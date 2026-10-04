@@ -21,7 +21,6 @@
     .pin{width:28px;height:28px;border-radius:9999px;background:#3730a3;color:#fff;font-weight:700;font-size:13px;
          display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
     .tab-activa{background:#3730a3;color:#fff}
-    /* En el panel docente los botones verdes pasan a índigo */
     .bg-teal-700{background-color:#3730a3 !important}
     .bg-teal-800{background-color:#312e81 !important}
     .text-teal-700{color:#3730a3 !important}
@@ -40,7 +39,6 @@
 
   <div id="error-js" class="hidden fixed top-0 inset-x-0 z-[60] bg-rose-700 text-white text-sm px-4 py-3"></div>
 
-  <!-- CABECERA -->
   <header class="bg-gradient-to-r from-slate-900 to-indigo-800 text-white sticky top-0 z-30 shadow-lg">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
       <img id="logo" alt="Insignia del colegio" class="hidden h-11 w-11 object-contain bg-white rounded-full p-0.5">
@@ -56,7 +54,6 @@
 
   <main class="max-w-4xl mx-auto px-4 py-6">
 
-    <!-- INGRESO DOCENTE -->
     <section id="pantalla-login" class="hidden max-w-md mx-auto">
       <div class="bg-white/90 backdrop-blur rounded-3xl shadow-xl p-6 space-y-5">
         <div class="text-center">
@@ -75,7 +72,6 @@
       </div>
     </section>
 
-    <!-- DOCENTE -->
     <section id="pantalla-docente" class="hidden space-y-4">
       <div class="bg-white/95 rounded-2xl shadow p-4 flex items-center gap-3">
         <span class="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl">👤</span>
@@ -89,7 +85,6 @@
     </section>
   </main>
 
-  <!-- MODAL -->
   <div id="modal" class="hidden fixed inset-0 z-40 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-white w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5 relative">
       <button data-accion="cerrar-modal" class="absolute right-4 top-3 text-2xl text-slate-400" aria-label="Cerrar">×</button>
@@ -97,7 +92,6 @@
     </div>
   </div>
 
-  <!-- CARGANDO / AVISOS -->
   <div id="cargando" class="hidden fixed inset-0 z-50 bg-white/70 flex items-center justify-center">
     <div class="bg-white shadow-xl rounded-2xl px-6 py-4 flex items-center gap-3">
       <div class="h-5 w-5 rounded-full border-4 border-indigo-800 border-t-transparent animate-spin"></div>
@@ -109,7 +103,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="app.js?v=3"></script>
-  <script src="app-docente.js?v=3"></script>
+  <script src="app.js?v=4"></script>
+  <script src="app-docente.js?v=4"></script>
 </body>
 </html>
