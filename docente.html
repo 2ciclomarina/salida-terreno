@@ -27,17 +27,25 @@
     .bg-teal-50{background-color:#eef2ff !important}
   </style>
   <script>
+    // Muestra errores de los archivos de la página (no los de imágenes que no cargan)
     window.addEventListener('error', function (e) {
       var b = document.getElementById('error-js');
       if (!b) return;
+      if (e.target && e.target !== window && e.target.tagName !== 'SCRIPT') return;
       var t = e.target && e.target.tagName === 'SCRIPT' ? 'No se pudo cargar el archivo: ' + (e.target.src || '').split('/').pop() : 'Error: ' + e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ', línea ' + e.lineno + ')' : '');
       b.textContent = t; b.classList.remove('hidden');
     }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      var b = document.getElementById('error-js');
+      var m = e.reason && e.reason.message ? e.reason.message : '';
+      if (!b || !m) return;
+      b.textContent = 'Error: ' + m; b.classList.remove('hidden');
+    });
   </script>
 </head>
 <body class="text-slate-800 min-h-screen" data-modo="docente">
 
-  <div id="error-js" class="hidden fixed top-0 inset-x-0 z-[60] bg-rose-700 text-white text-sm px-4 py-3"></div>
+  <div id="error-js" onclick="this.classList.add('hidden')" class="hidden fixed top-0 inset-x-0 z-[60] bg-rose-700 text-white text-sm px-4 py-3 cursor-pointer"></div>
 
   <header class="bg-gradient-to-r from-slate-900 to-indigo-800 text-white sticky top-0 z-30 shadow-lg">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -103,7 +111,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="app.js?v=4"></script>
-  <script src="app-docente.js?v=4"></script>
+  <script src="app.js?v=5"></script>
+  <script src="app-docente.js?v=5"></script>
 </body>
 </html>
