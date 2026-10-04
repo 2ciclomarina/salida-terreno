@@ -13,7 +13,8 @@ const CLAVE_SESION = 'sesion_' + MODO;
 const TIPOS = {
   alternativas: { ic: '✅', nom: 'Alternativas', c: 'sky' },
   desarrollo: { ic: '✍️', nom: 'Desarrollo', c: 'violet' },
-  foto: { ic: '📷', nom: 'Fotografía', c: 'amber' }
+  foto: { ic: '📷', nom: 'Fotografía', c: 'amber' },
+  grupo: { ic: '🧩', nom: 'Ejercicio con partes', c: 'indigo' }
 };
 
 const S = {
@@ -31,6 +32,23 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now()
 const fechaCorta = iso => new Date(iso).toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const rutKey = r => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
 
+function jsonSeguro(s, def) {
+  if (s && typeof s === 'object') return s;
+  try { const v = JSON.parse(s); return v == null ? def : v; } catch (_) { return def; }
+}
+// Respuesta en texto simple (sirve para el PDF); en ejercicios con partes une todas las partes
+function respuestaTexto(a, r) {
+  if (!a || a.tipo !== 'grupo') return r.respuesta || '';
+  const resp = jsonSeguro(r.respuesta, {});
+  return (a.partes || []).map((p, i) => 'Parte ' + (i + 1) + ': ' + (resp[p.id] || (p.tipo === 'foto' ? '(fotografía)' : '(sin respuesta)'))).join('\n');
+}
+// Identificadores de todas las fotos de una respuesta
+function fotosDe(r) {
+  const m = jsonSeguro(r.fotos, {});
+  const ids = Object.keys(m).map(k => m[k]).filter(Boolean);
+  if (!ids.length && r.foto_id) ids.push(r.foto_id);
+  return ids;
+}
 function tiempoRestante(ms) {
   if (ms <= 0) return '0 min';
   const m = Math.round(ms / 60000);
@@ -178,11 +196,12 @@ function obtenerPosicion() {
 
 /* ---------- Archivos de Drive (con caché local) ---------- */
 async function dataUrlArchivo(id) {
-  const k = 'arch:' + id;
+  const k = 'arch2:' + id; // clave nueva: descarta copias dañadas de versiones anteriores
   const v = await cacheGet(k);
-  if (v) return v;
+  if (v && String(v).indexOf('data:image/') === 0) return v;
   if (!navigator.onLine) return null;
   const d = await api('getArchivo', { id });
+  if (!d.dataUrl || String(d.dataUrl).indexOf('data:image/') !== 0) throw new Error('El archivo no es una imagen válida');
   await cachePut(k, d.dataUrl);
   return d.dataUrl;
 }
@@ -376,7 +395,7 @@ function respuestaDe(a) {
   const srv = S.datos.respuestas.find(r => r.actividad_id === a.id);
   if (srv) return Object.assign({ origen: 'servidor' }, srv);
   const loc = S.pend.find(p => p.actividad_id === a.id);
-  if (loc) return { origen: 'local', respuesta: loc.respuesta, fotoB64: loc.fotoB64, estado: 'pendiente' };
+  if (loc) return { origen: 'local', respuesta: loc.respuesta, fotoB64: loc.fotoB64, fotosB64: loc.fotosB64, estado: 'pendiente' };
   return null;
 }
 
@@ -461,10 +480,24 @@ function renderContenidoEst() {
 function bloqueRespuesta(a, r) {
   if (!r) return '';
   const loc = r.origen === 'local';
-  let cuerpo = r.respuesta ? `<p class="whitespace-pre-line">${esc(r.respuesta)}</p>` : '';
-  if (a.tipo === 'foto') {
-    if (loc && r.fotoB64) cuerpo += `<img src="${r.fotoB64}" class="mt-2 rounded-xl max-h-40" alt="Su fotografía">`;
-    else if (r.foto_id) cuerpo += `<img data-archivo="${esc(r.foto_id)}" class="mt-2 rounded-xl max-h-40 bg-slate-100" alt="Su fotografía">`;
+  let cuerpo = '';
+  if (a.tipo === 'grupo') {
+    const resp = jsonSeguro(r.respuesta, {}), fotos = loc ? {} : jsonSeguro(r.fotos, {});
+    cuerpo = (a.partes || []).map((p, i) => {
+      let t = `<div class="text-xs font-semibold text-slate-500">Parte ${i + 1}</div>`;
+      if (resp[p.id]) t += `<p class="whitespace-pre-line">${esc(resp[p.id])}</p>`;
+      if (p.tipo === 'foto') {
+        if (loc && r.fotosB64 && r.fotosB64[p.id]) t += `<img src="${r.fotosB64[p.id]}" class="mt-1 rounded-xl max-h-32" alt="Su fotografía">`;
+        else if (fotos[p.id]) t += `<img data-archivo="${esc(fotos[p.id])}" class="mt-1 rounded-xl max-h-32 bg-slate-100" alt="Su fotografía">`;
+      }
+      return `<div class="mb-2">${t}</div>`;
+    }).join('');
+  } else {
+    cuerpo = r.respuesta ? `<p class="whitespace-pre-line">${esc(r.respuesta)}</p>` : '';
+    if (a.tipo === 'foto') {
+      if (loc && r.fotoB64) cuerpo += `<img src="${r.fotoB64}" class="mt-2 rounded-xl max-h-40" alt="Su fotografía">`;
+      else if (r.foto_id) cuerpo += `<img data-archivo="${esc(r.foto_id)}" class="mt-2 rounded-xl max-h-40 bg-slate-100" alt="Su fotografía">`;
+    }
   }
   if (!cuerpo) cuerpo = '<p class="text-slate-400">(sin texto)</p>';
   return `<div class="mt-3 rounded-2xl bg-slate-50 border border-slate-200 p-3 text-sm">
@@ -497,6 +530,7 @@ function tarjetaActividad(a) {
   } else if (r && r.origen !== 'local') {
     res = '<div class="mt-2 text-xs text-slate-500">Su profesor revisará su respuesta.</div>';
   }
+  const nPartes = a.tipo === 'grupo' ? ` · ${(a.partes || []).length} partes` : '';
   return `<article class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
     <div class="w-2 bg-${T.c}-500"></div>
     <div class="p-4 flex-1 min-w-0">
@@ -504,7 +538,7 @@ function tarjetaActividad(a) {
         <div class="h-11 w-11 shrink-0 rounded-2xl bg-${T.c}-100 flex items-center justify-center text-2xl">${T.ic}</div>
         <div class="flex-1 min-w-0">
           <h3 class="font-bold leading-tight">${esc(a.titulo)}</h3>
-          <p class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt</p>
+          <p class="text-xs text-slate-500">${T.nom}${nPartes} · ${esc(a.puntaje_max)} pt</p>
         </div>
         ${est}
       </div>
@@ -513,6 +547,32 @@ function tarjetaActividad(a) {
         <button data-accion="ver-punto" data-punto="${esc(pt.id)}" class="underline text-teal-700 font-semibold">Ver en el mapa</button></div>` : ''}
       ${bloqueRespuesta(a, r)}${res}${boton}
     </div></article>`;
+}
+
+function camposGrupo(a) {
+  return (a.partes || []).map((p, i) => {
+    const T = TIPOS[p.tipo] || TIPOS.desarrollo;
+    let cuerpo = '';
+    if (p.tipo === 'alternativas') {
+      cuerpo = (p.opciones || []).map((o, j) => `<label class="block cursor-pointer"><input type="radio" name="alt_${esc(p.id)}" value="${j}" class="peer sr-only">
+        <div class="flex items-center gap-3 p-3 rounded-2xl border-2 border-slate-200 bg-white peer-checked:border-teal-600 peer-checked:bg-teal-50 transition">
+        <span class="h-8 w-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold text-sm">${String.fromCharCode(65 + j)}</span>
+        <span class="text-sm">${esc(o)}</span></div></label>`).join('');
+    } else if (p.tipo === 'desarrollo') {
+      cuerpo = `<textarea id="t_${esc(p.id)}" rows="5" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
+    } else {
+      cuerpo = `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-4 cursor-pointer text-center">
+          <span class="text-3xl">📷</span><span class="font-semibold text-sm">Tomar o elegir fotografía</span>
+          <input id="f_${esc(p.id)}" type="file" accept="image/*" capture="environment" class="hidden"></label>
+        <img id="pv_${esc(p.id)}" class="hidden rounded-2xl max-h-48 mx-auto" alt="Vista previa">
+        <textarea id="t_${esc(p.id)}" rows="2" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Descripción de la fotografía (opcional)"></textarea>`;
+    }
+    return `<div class="rounded-2xl border-2 border-${T.c}-200 p-3 space-y-2">
+      <div class="flex items-center gap-2"><span class="h-7 w-7 rounded-full bg-${T.c}-500 text-white text-sm font-bold flex items-center justify-center">${i + 1}</span>
+        <span class="text-xs font-semibold text-slate-500">${T.ic} ${T.nom} · ${esc(p.puntaje)} pt</span></div>
+      <div class="text-sm whitespace-pre-line">${esc(p.enunciado)}</div>
+      <div class="space-y-2">${cuerpo}</div></div>`;
+  }).join('');
 }
 
 async function abrirResponder(id) {
@@ -527,12 +587,14 @@ async function abrirResponder(id) {
       <span class="text-sm">${esc(o)}</span></div></label>`).join('');
   } else if (a.tipo === 'desarrollo') {
     campos = `<textarea id="r-texto" rows="7" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
-  } else {
+  } else if (a.tipo === 'foto') {
     campos = `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-5 cursor-pointer text-center">
         <span class="text-4xl">📷</span><span class="font-semibold text-sm">Tomar o elegir fotografía</span>
         <input id="r-foto" type="file" accept="image/*" capture="environment" class="hidden"></label>
       <img id="r-prev" class="hidden rounded-2xl max-h-60 mx-auto" alt="Vista previa">
       <textarea id="r-texto" rows="3" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Descripción de la fotografía (opcional)"></textarea>`;
+  } else {
+    campos = camposGrupo(a);
   }
   modal(`<div class="space-y-3 pt-2">
     <div class="flex items-center gap-3 pr-6">
@@ -541,8 +603,8 @@ async function abrirResponder(id) {
       <p class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt · ⏱ cierra en ${tiempoRestante(Date.parse(a.fecha_fin) - ahoraSrv())}</p></div>
     </div>
     ${a.imagen_id ? `<img data-archivo="${esc(a.imagen_id)}" class="rounded-2xl max-h-64 mx-auto bg-slate-100" alt="Imagen de apoyo">` : ''}
-    <div class="bg-slate-50 rounded-2xl p-3 text-sm whitespace-pre-line">${esc(a.enunciado)}</div>
-    <div class="space-y-2">${campos}</div>
+    ${a.enunciado ? `<div class="bg-slate-50 rounded-2xl p-3 text-sm whitespace-pre-line">${esc(a.enunciado)}</div>` : ''}
+    <div class="space-y-3">${campos}</div>
     ${a.requiere_gps !== 'no' ? '<p class="text-xs text-slate-500 bg-sky-50 rounded-xl p-2">📍 Al enviar se registrará su ubicación. Active el GPS de su teléfono.</p>' : ''}
     <button id="btn-enviar-resp" data-accion="enviar-resp" data-id="${esc(a.id)}" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-2xl shadow">Enviar respuesta</button>
   </div>`);
@@ -554,11 +616,23 @@ async function abrirResponder(id) {
     p.src = URL.createObjectURL(f.files[0]);
     p.classList.remove('hidden');
   };
+  if (a.tipo === 'grupo') {
+    (a.partes || []).filter(p => p.tipo === 'foto').forEach(p => {
+      const fi = $('#f_' + p.id);
+      if (fi) fi.onchange = () => {
+        if (!fi.files[0]) return;
+        const pv = $('#pv_' + p.id);
+        pv.src = URL.createObjectURL(fi.files[0]);
+        pv.classList.remove('hidden');
+      };
+    });
+  }
 }
 async function enviarRespuestaUI(id) {
   const a = S.datos.actividades.find(x => x.id === id);
   if (estadoVentana(a) !== 'abierta') return aviso('El plazo de esta actividad terminó.', 'error');
   let respuesta = '', file = null;
+  const files = {};
   if (a.tipo === 'alternativas') {
     const sel = $('input[name=alt]:checked');
     if (!sel) return aviso('Elija una alternativa.', 'error');
@@ -566,10 +640,32 @@ async function enviarRespuestaUI(id) {
   } else if (a.tipo === 'desarrollo') {
     respuesta = $('#r-texto').value.trim();
     if (respuesta.length < 3) return aviso('Escriba su respuesta antes de enviar.', 'error');
-  } else {
+  } else if (a.tipo === 'foto') {
     file = $('#r-foto').files[0];
     if (!file) return aviso('Tome o elija una fotografía.', 'error');
     respuesta = $('#r-texto').value.trim();
+  } else {
+    const resp = {};
+    const ps = a.partes || [];
+    for (let i = 0; i < ps.length; i++) {
+      const p = ps[i];
+      if (p.tipo === 'alternativas') {
+        const s = $(`input[name="alt_${p.id}"]:checked`);
+        if (!s) return aviso('Elija una alternativa en la parte ' + (i + 1) + '.', 'error');
+        resp[p.id] = p.opciones[+s.value];
+      } else if (p.tipo === 'desarrollo') {
+        const v = $('#t_' + p.id).value.trim();
+        if (v.length < 3) return aviso('Escriba su respuesta en la parte ' + (i + 1) + '.', 'error');
+        resp[p.id] = v;
+      } else {
+        const fi = $('#f_' + p.id).files[0];
+        if (!fi) return aviso('Tome o elija la fotografía de la parte ' + (i + 1) + '.', 'error');
+        files[p.id] = fi;
+        const t = $('#t_' + p.id);
+        resp[p.id] = t ? t.value.trim() : '';
+      }
+    }
+    respuesta = JSON.stringify(resp);
   }
   const btn = $('#btn-enviar-resp');
   const pideGPS = a.requiere_gps !== 'no';
@@ -583,8 +679,10 @@ async function enviarRespuestaUI(id) {
   btn.textContent = 'Guardando…';
   try {
     const foto = file ? await comprimirImagen(file) : null;
+    const fotosB64 = {};
+    for (const pid of Object.keys(files)) fotosB64[pid] = await comprimirImagen(files[pid]);
     await colaPut({
-      client_id: uuid(), rut: S.usuario.key, actividad_id: id, respuesta, fotoB64: foto,
+      client_id: uuid(), rut: S.usuario.key, actividad_id: id, respuesta, fotoB64: foto, fotosB64,
       lat: pos ? pos.lat : null, lng: pos ? pos.lng : null, precision: pos ? pos.precision : 0, ts_cliente: ahoraSrv()
     });
     cerrarModal();
