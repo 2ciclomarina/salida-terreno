@@ -3,7 +3,7 @@
    SALIDA A TERRENO – Lógica común y de alumnos
    (La parte del docente está en app-docente.js)
    ========================================================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxYz1D54NQju3TEtZZJDYs-ZeCaKCKwn-mI__boa3HWrzhFkV7zuxJNKa-cTHRebRdC6w/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwq1XkahCirWI2GqLrsW8czcFgNwZgXCwKIeDonura_mB2SQeVO90JQd-egdkIFFof7ug/exec';
 const MAX_FOTO_KB = 500;
 const EXIGENCIA = 60; // % para nota 4,0
 const MODO = (document.body && document.body.dataset.modo) || 'alumno';
