@@ -10,11 +10,17 @@ const MODO = (document.body && document.body.dataset.modo) || 'alumno';
 const ROL_PAGINA = MODO === 'docente' ? 'docente' : 'estudiante';
 const CLAVE_SESION = 'sesion_' + MODO;
 
+const TIPOS = {
+  alternativas: { ic: '✅', nom: 'Alternativas', c: 'sky' },
+  desarrollo: { ic: '✍️', nom: 'Desarrollo', c: 'violet' },
+  foto: { ic: '📷', nom: 'Fotografía', c: 'amber' }
+};
+
 const S = {
   rol: null, token: null, usuario: null, datos: null, offset: 0, pend: [],
   tab: 'pendientes', tabDoc: 'resumen', panel: null, insignia: null,
-  mapa: null, watchId: null, pos: null, yo: null, yoPrec: null, firma: null,
-  filtroIA: { act: '', pend: true }
+  mapa: null, mapaModal: null, watchId: null, pos: null, yo: null, yoPrec: null, firma: null,
+  foco: null, filtroR: { act: '', estado: 'todas' }
 };
 
 /* ---------- Utilidades ---------- */
@@ -25,6 +31,15 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now()
 const fechaCorta = iso => new Date(iso).toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const rutKey = r => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
 
+function tiempoRestante(ms) {
+  if (ms <= 0) return '0 min';
+  const m = Math.round(ms / 60000);
+  if (m < 60) return m + ' min';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+  const d = Math.floor(h / 24);
+  return d + ' d' + (h % 24 ? ' ' + (h % 24) + ' h' : '');
+}
 function dvRut(cuerpo) {
   let s = 0, m = 2;
   for (let i = cuerpo.length - 1; i >= 0; i--) { s += (+cuerpo[i]) * m; m = m === 7 ? 2 : m + 1; }
@@ -58,8 +73,14 @@ function cargando(on, msg = 'Cargando…') {
   $('#cargando').classList.toggle('hidden', !on);
 }
 const chip = (t, c) => `<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-${c}-100 text-${c}-800">${esc(t)}</span>`;
-function modal(html) { $('#modal-cuerpo').innerHTML = html; $('#modal').classList.remove('hidden'); }
-function cerrarModal() { $('#modal').classList.add('hidden'); $('#modal-cuerpo').innerHTML = ''; }
+function limpiarMapaModal() { if (S.mapaModal) { S.mapaModal.remove(); S.mapaModal = null; } }
+function modal(html) {
+  limpiarMapaModal();
+  $('#modal-cuerpo').innerHTML = html;
+  $('#modal').classList.remove('hidden');
+  $('#modal-cuerpo').parentElement.scrollTop = 0;
+}
+function cerrarModal() { limpiarMapaModal(); $('#modal').classList.add('hidden'); $('#modal-cuerpo').innerHTML = ''; }
 function mostrar(id) {
   ['login', 'carta', 'estudiante', 'docente'].forEach(p => {
     const el = $('#pantalla-' + p);
@@ -236,7 +257,11 @@ async function sincronizar() {
         else throw e;
       }
     }
-    if (enviados) { await cargarInicio(); aviso('Sus respuestas se enviaron correctamente.'); if (!$('#pantalla-estudiante').classList.contains('hidden')) renderContenidoEst(); }
+    if (enviados) {
+      await cargarInicio();
+      aviso('Sus respuestas se enviaron correctamente.');
+      if (!$('#pantalla-estudiante').classList.contains('hidden')) renderEstudiante();
+    }
     await actualizarContador();
   } catch (e) { console.warn('Sincronización pendiente:', e); }
   finally { sincronizando = false; }
@@ -254,6 +279,57 @@ async function cerrarSesion(confirmar) {
   Object.assign(S, { rol: null, token: null, usuario: null, datos: null, panel: null, pend: [] });
   $('#cola-contador').classList.add('hidden');
   mostrar('login');
+}
+
+/* ---------- Mapas (Leaflet) ---------- */
+function capasBase() {
+  const opt = att => ({ maxZoom: 17, crossOrigin: true, attribution: att });
+  return {
+    topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', opt('© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)')),
+    osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', opt('© OpenStreetMap')),
+    esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', opt('© Esri'))
+  };
+}
+function crearMapa(idDiv, puntos, op) {
+  op = op || {};
+  detenerMapa();
+  const c = capasBase();
+  const m = L.map(idDiv, { layers: [c.topo] });
+  L.control.layers({ 'Topográfico (relieve)': c.topo, 'Topográfico Esri': c.esri, 'Calles': c.osm }).addTo(m);
+  const coords = [], marcas = {};
+  puntos.forEach((p, i) => {
+    if (!isFinite(p.lat) || !isFinite(p.lng)) return;
+    const mk = L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="pin">${i + 1}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }) })
+      .addTo(m).bindPopup(op.popup ? op.popup(p) : `<b>${esc(p.nombre)}</b><br>${esc(p.descripcion || '')}`);
+    marcas[p.id] = mk;
+    coords.push([p.lat, p.lng]);
+  });
+  if (coords.length) m.fitBounds(coords, { padding: [40, 40], maxZoom: 16 });
+  else m.setView([-36.83, -73.05], 12);
+  if (op.foco && marcas[op.foco]) { m.setView(marcas[op.foco].getLatLng(), 16); marcas[op.foco].openPopup(); }
+  S.mapa = m;
+  if (op.seguir) iniciarGPS();
+  setTimeout(() => m.invalidateSize(), 150);
+}
+function iniciarGPS() {
+  if (!navigator.geolocation) return;
+  S.watchId = navigator.geolocation.watchPosition(p => {
+    const ll = [p.coords.latitude, p.coords.longitude];
+    S.pos = ll;
+    if (!S.mapa) return;
+    if (!S.yo) {
+      S.yo = L.circleMarker(ll, { radius: 9, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(S.mapa);
+      S.yoPrec = L.circle(ll, { radius: p.coords.accuracy, color: '#2563eb', weight: 1, fillOpacity: 0.1 }).addTo(S.mapa);
+    } else { S.yo.setLatLng(ll); S.yoPrec.setLatLng(ll).setRadius(p.coords.accuracy); }
+    const g = $('#gps-estado');
+    if (g) g.textContent = `Su posición: ${ll[0].toFixed(5)}, ${ll[1].toFixed(5)} (±${Math.round(p.coords.accuracy)} m)`;
+  }, () => { const g = $('#gps-estado'); if (g) g.textContent = 'No se pudo obtener su ubicación. Active el GPS.'; },
+  { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+}
+function detenerMapa() {
+  if (S.watchId != null) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
+  if (S.mapa) { S.mapa.remove(); S.mapa = null; }
+  S.yo = null; S.yoPrec = null;
 }
 
 /* =========================================================
@@ -300,7 +376,7 @@ function respuestaDe(a) {
   const srv = S.datos.respuestas.find(r => r.actividad_id === a.id);
   if (srv) return Object.assign({ origen: 'servidor' }, srv);
   const loc = S.pend.find(p => p.actividad_id === a.id);
-  if (loc) return { origen: 'local', respuesta: loc.respuesta, estado: 'pendiente' };
+  if (loc) return { origen: 'local', respuesta: loc.respuesta, fotoB64: loc.fotoB64, estado: 'pendiente' };
   return null;
 }
 
@@ -344,15 +420,33 @@ async function aceptarCarta() {
   } catch (e) { cargando(false); aviso(e.message, 'error'); }
 }
 
-/* Dashboard */
+/* Panel del estudiante */
 function renderEstudiante() {
-  const e = S.usuario;
-  $('#est-info').innerHTML = `<div class="font-bold text-lg">${esc(e.nombre)}</div>
-    <div class="text-sm text-slate-500">RUT ${esc(e.rut)} · ${esc(e.curso)}</div>`;
+  const e = S.usuario, acts = S.datos.actividades;
+  const hechas = acts.filter(a => respuestaDe(a)).length, tot = acts.length;
+  const pct = tot ? Math.round(hechas / tot * 100) : 0;
+  $('#est-info').innerHTML = `<div class="rounded-3xl bg-gradient-to-br from-teal-600 to-sky-600 text-white p-5 shadow-lg">
+    <div class="text-sm opacity-90">Hola 👋</div>
+    <div class="text-xl font-extrabold leading-tight">${esc(e.nombre)}</div>
+    <div class="text-xs opacity-90">RUT ${esc(e.rut)} · ${esc(e.curso)}</div>
+    <div class="mt-4">
+      <div class="flex justify-between text-xs mb-1"><span>Su avance</span><span><b>${hechas}</b> de ${tot} actividades</span></div>
+      <div class="h-3 bg-white/25 rounded-full overflow-hidden"><div class="h-3 bg-white rounded-full transition-all" style="width:${pct}%"></div></div>
+      ${tot && hechas === tot ? '<div class="text-xs mt-2 font-semibold">🎉 ¡Completó todas las actividades!</div>' : ''}
+    </div>
+  </div>`;
   renderContenidoEst();
 }
+const TABS_EST = [['pendientes', '⏳', 'Pendientes'], ['realizadas', '✅', 'Realizadas'], ['todas', '📚', 'Todas'], ['mapa', '🗺️', 'Mapa']];
+function renderTabsEst() {
+  const acts = S.datos.actividades, n = acts.filter(a => respuestaDe(a)).length;
+  const cnt = { pendientes: acts.length - n, realizadas: n, todas: acts.length };
+  $('#est-tabs').innerHTML = TABS_EST.map(([k, ic, t]) =>
+    `<button data-accion="tab-est" data-tab="${k}" class="py-2 rounded-xl flex flex-col items-center leading-tight ${S.tab === k ? 'tab-activa' : ''}">
+      <span class="text-lg">${ic}</span><span>${t}${cnt[k] !== undefined ? ' (' + cnt[k] + ')' : ''}</span></button>`).join('');
+}
 function renderContenidoEst() {
-  $$('[data-accion="tab-est"]').forEach(b => b.classList.toggle('tab-activa', b.dataset.tab === S.tab));
+  renderTabsEst();
   if (S.tab === 'mapa') return renderMapaEst();
   detenerMapa();
   const lista = S.datos.actividades.filter(a => {
@@ -361,54 +455,100 @@ function renderContenidoEst() {
   });
   $('#est-contenido').innerHTML = lista.length
     ? lista.map(tarjetaActividad).join('')
-    : `<div class="text-center text-slate-500 py-10">${S.tab === 'pendientes' ? '🎉 No tiene actividades pendientes.' : 'Aún no hay actividades aquí.'}</div>`;
+    : `<div class="text-center text-slate-500 py-10 bg-white/80 rounded-2xl">${S.tab === 'pendientes' ? '🎉 No tiene actividades pendientes.' : 'Aún no hay actividades aquí.'}</div>`;
+  pintarImagenes($('#est-contenido'));
+}
+function bloqueRespuesta(a, r) {
+  if (!r) return '';
+  const loc = r.origen === 'local';
+  let cuerpo = r.respuesta ? `<p class="whitespace-pre-line">${esc(r.respuesta)}</p>` : '';
+  if (a.tipo === 'foto') {
+    if (loc && r.fotoB64) cuerpo += `<img src="${r.fotoB64}" class="mt-2 rounded-xl max-h-40" alt="Su fotografía">`;
+    else if (r.foto_id) cuerpo += `<img data-archivo="${esc(r.foto_id)}" class="mt-2 rounded-xl max-h-40 bg-slate-100" alt="Su fotografía">`;
+  }
+  if (!cuerpo) cuerpo = '<p class="text-slate-400">(sin texto)</p>';
+  return `<div class="mt-3 rounded-2xl bg-slate-50 border border-slate-200 p-3 text-sm">
+    <div class="text-xs font-semibold text-slate-500 mb-1">Su respuesta${loc ? ' (guardada en su teléfono, aún sin enviar)' : ''}</div>${cuerpo}</div>`;
 }
 function tarjetaActividad(a) {
-  const v = estadoVentana(a), r = respuestaDe(a);
+  const v = estadoVentana(a), r = respuestaDe(a), T = TIPOS[a.tipo] || TIPOS.desarrollo;
+  const pt = (S.datos.puntos || []).find(p => p.id === a.punto_id);
   let est;
   if (r) est = r.origen === 'local' ? chip('Por enviar', 'amber') : r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Enviada', 'sky');
   else est = v === 'abierta' ? chip('Abierta', 'emerald') : v === 'pronto' ? chip('Aún no abre', 'slate') : chip('Cerrada', 'rose');
+  let tiempo = '';
+  if (!r) {
+    if (v === 'abierta') tiempo = `⏱ Cierra en ${tiempoRestante(Date.parse(a.fecha_fin) - ahoraSrv())}`;
+    else if (v === 'pronto') tiempo = `🔒 Abre el ${fechaCorta(a.fecha_inicio)}`;
+    else tiempo = `⌛ Cerró el ${fechaCorta(a.fecha_fin)}`;
+  }
   let boton = '';
   if (!r) {
     boton = v === 'abierta'
-      ? `<button data-accion="responder" data-id="${esc(a.id)}" class="mt-3 w-full bg-teal-700 text-white font-bold py-2.5 rounded-xl">Responder</button>`
-      : `<button disabled class="mt-3 w-full bg-slate-200 text-slate-500 font-semibold py-2.5 rounded-xl">${v === 'pronto' ? 'Disponible desde ' + fechaCorta(a.fecha_inicio) : 'El plazo terminó'}</button>`;
+      ? `<button data-accion="responder" data-id="${esc(a.id)}" class="mt-3 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-2xl shadow">Responder</button>`
+      : `<button disabled class="mt-3 w-full bg-slate-200 text-slate-500 font-semibold py-3 rounded-2xl">${v === 'pronto' ? 'Todavía no disponible' : 'El plazo terminó'}</button>`;
   }
-  const res = r && r.estado === 'evaluada'
-    ? `<div class="mt-3 text-sm bg-emerald-50 rounded-xl p-3">Puntaje: <b>${esc(r.puntaje_final)}</b> de ${esc(a.puntaje_max)}${r.retro_docente ? `<div class="mt-1">${esc(r.retro_docente)}</div>` : ''}</div>` : '';
-  const tipo = { alternativas: 'Alternativas', desarrollo: 'Desarrollo', foto: 'Fotografía' }[a.tipo] || a.tipo;
-  return `<article class="bg-white/95 rounded-2xl shadow p-4">
-    <div class="flex items-start justify-between gap-2">
-      <h3 class="font-bold">${esc(a.titulo)}</h3>${est}
-    </div>
-    <p class="text-xs text-slate-500 mt-1">${tipo} · ${esc(a.puntaje_max)} pt · ${fechaCorta(a.fecha_inicio)} a ${fechaCorta(a.fecha_fin)}</p>
-    ${res}${boton}</article>`;
+  let res = '';
+  if (r && r.estado === 'evaluada') {
+    const ok = Number(r.puntaje_final) > 0;
+    res = `<div class="mt-3 text-sm bg-emerald-50 border border-emerald-200 rounded-2xl p-3">
+      ${a.tipo === 'alternativas' ? (ok ? '✔ <b>Correcta</b> · ' : '✖ <b>Incorrecta</b> · ') : ''}Puntaje: <b>${esc(r.puntaje_final)}</b> de ${esc(a.puntaje_max)}
+      ${r.retro_docente ? `<div class="mt-1 text-slate-700">💬 ${esc(r.retro_docente)}</div>` : ''}</div>`;
+  } else if (r && r.origen !== 'local') {
+    res = '<div class="mt-2 text-xs text-slate-500">Su profesor revisará su respuesta.</div>';
+  }
+  return `<article class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
+    <div class="w-2 bg-${T.c}-500"></div>
+    <div class="p-4 flex-1 min-w-0">
+      <div class="flex items-start gap-3">
+        <div class="h-11 w-11 shrink-0 rounded-2xl bg-${T.c}-100 flex items-center justify-center text-2xl">${T.ic}</div>
+        <div class="flex-1 min-w-0">
+          <h3 class="font-bold leading-tight">${esc(a.titulo)}</h3>
+          <p class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt</p>
+        </div>
+        ${est}
+      </div>
+      ${tiempo ? `<div class="mt-2 text-xs font-semibold text-slate-600">${tiempo}</div>` : ''}
+      ${pt ? `<div class="mt-2 flex items-center gap-2 text-xs"><span>📍 ${esc(pt.nombre)}</span>
+        <button data-accion="ver-punto" data-punto="${esc(pt.id)}" class="underline text-teal-700 font-semibold">Ver en el mapa</button></div>` : ''}
+      ${bloqueRespuesta(a, r)}${res}${boton}
+    </div></article>`;
 }
 
 async function abrirResponder(id) {
   const a = S.datos.actividades.find(x => x.id === id);
   if (!a || estadoVentana(a) !== 'abierta') return aviso('Esta actividad no está disponible en este momento.', 'error');
+  const T = TIPOS[a.tipo] || TIPOS.desarrollo;
   let campos = '';
   if (a.tipo === 'alternativas') {
-    campos = a.opciones.map((o, i) => `<label class="flex items-start gap-3 p-3 border rounded-xl"><input type="radio" name="alt" value="${i}" class="mt-1"><span>${esc(o)}</span></label>`).join('');
+    campos = a.opciones.map((o, i) => `<label class="block cursor-pointer"><input type="radio" name="alt" value="${i}" class="peer sr-only">
+      <div class="flex items-center gap-3 p-3 rounded-2xl border-2 border-slate-200 bg-white peer-checked:border-teal-600 peer-checked:bg-teal-50 transition">
+      <span class="h-9 w-9 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold">${String.fromCharCode(65 + i)}</span>
+      <span class="text-sm">${esc(o)}</span></div></label>`).join('');
   } else if (a.tipo === 'desarrollo') {
-    campos = `<textarea id="r-texto" rows="6" class="w-full border rounded-xl p-3" placeholder="Escriba aquí su respuesta"></textarea>`;
+    campos = `<textarea id="r-texto" rows="7" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
   } else {
-    campos = `<input id="r-foto" type="file" accept="image/*" capture="environment" class="w-full text-sm">
-      <img id="r-prev" class="hidden rounded-xl max-h-60 mx-auto" alt="Vista previa">
-      <textarea id="r-texto" rows="3" class="w-full border rounded-xl p-3" placeholder="Descripción de la fotografía (opcional)"></textarea>`;
+    campos = `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-5 cursor-pointer text-center">
+        <span class="text-4xl">📷</span><span class="font-semibold text-sm">Tomar o elegir fotografía</span>
+        <input id="r-foto" type="file" accept="image/*" capture="environment" class="hidden"></label>
+      <img id="r-prev" class="hidden rounded-2xl max-h-60 mx-auto" alt="Vista previa">
+      <textarea id="r-texto" rows="3" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Descripción de la fotografía (opcional)"></textarea>`;
   }
-  modal(`<div class="space-y-3 pt-3">
-    <h3 class="text-lg font-extrabold pr-6">${esc(a.titulo)}</h3>
-    ${a.imagen_id ? `<img data-archivo="${esc(a.imagen_id)}" class="rounded-xl max-h-64 mx-auto bg-slate-100" alt="Imagen de apoyo">` : ''}
-    <p class="whitespace-pre-line">${esc(a.enunciado)}</p>
+  modal(`<div class="space-y-3 pt-2">
+    <div class="flex items-center gap-3 pr-6">
+      <div class="h-12 w-12 shrink-0 rounded-2xl bg-${T.c}-100 flex items-center justify-center text-2xl">${T.ic}</div>
+      <div><h3 class="text-lg font-extrabold leading-tight">${esc(a.titulo)}</h3>
+      <p class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt · ⏱ cierra en ${tiempoRestante(Date.parse(a.fecha_fin) - ahoraSrv())}</p></div>
+    </div>
+    ${a.imagen_id ? `<img data-archivo="${esc(a.imagen_id)}" class="rounded-2xl max-h-64 mx-auto bg-slate-100" alt="Imagen de apoyo">` : ''}
+    <div class="bg-slate-50 rounded-2xl p-3 text-sm whitespace-pre-line">${esc(a.enunciado)}</div>
     <div class="space-y-2">${campos}</div>
-    ${a.requiere_gps !== 'no' ? '<p class="text-xs text-slate-500">Al enviar se registrará su ubicación. Active el GPS de su teléfono.</p>' : ''}
-    <button id="btn-enviar-resp" data-accion="enviar-resp" data-id="${esc(a.id)}" class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl">Enviar respuesta</button>
+    ${a.requiere_gps !== 'no' ? '<p class="text-xs text-slate-500 bg-sky-50 rounded-xl p-2">📍 Al enviar se registrará su ubicación. Active el GPS de su teléfono.</p>' : ''}
+    <button id="btn-enviar-resp" data-accion="enviar-resp" data-id="${esc(a.id)}" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-2xl shadow">Enviar respuesta</button>
   </div>`);
   pintarImagenes($('#modal-cuerpo'));
   const f = $('#r-foto');
-  if (f) f.onchange = async () => {
+  if (f) f.onchange = () => {
     if (!f.files[0]) return;
     const p = $('#r-prev');
     p.src = URL.createObjectURL(f.files[0]);
@@ -448,59 +588,23 @@ async function enviarRespuestaUI(id) {
       lat: pos ? pos.lat : null, lng: pos ? pos.lng : null, precision: pos ? pos.precision : 0, ts_cliente: ahoraSrv()
     });
     cerrarModal();
-    await refrescarPend(); await actualizarContador(); renderContenidoEst();
+    await refrescarPend(); await actualizarContador(); renderEstudiante();
     if (navigator.onLine) sincronizar();
     else { aviso('Respuesta guardada en su teléfono. Se enviará sola cuando tenga internet.'); registrarSync(); }
   } catch (e) { btn.disabled = false; btn.textContent = 'Enviar respuesta'; aviso(e.message, 'error'); }
 }
-
-/* Mapas (Leaflet) */
-function crearMapa(idDiv, puntos, seguir) {
-  detenerMapa();
-  const opt = (att, extra) => Object.assign({ maxZoom: 17, crossOrigin: true, attribution: att }, extra || {});
-  const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', opt('© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)'));
-  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', opt('© OpenStreetMap'));
-  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', opt('© Esri'));
-  const m = L.map(idDiv, { layers: [topo] });
-  L.control.layers({ 'Topográfico (relieve)': topo, 'Topográfico Esri': esri, 'Calles': osm }).addTo(m);
-  const coords = [];
-  puntos.forEach((p, i) => {
-    if (!isFinite(p.lat) || !isFinite(p.lng)) return;
-    L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="pin">${i + 1}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }) })
-      .addTo(m).bindPopup(`<b>${esc(p.nombre)}</b><br>${esc(p.descripcion || '')}`);
-    coords.push([p.lat, p.lng]);
-  });
-  if (coords.length) m.fitBounds(coords, { padding: [40, 40], maxZoom: 16 });
-  else m.setView([-36.83, -73.05], 12);
-  S.mapa = m;
-  if (seguir) iniciarGPS();
-  setTimeout(() => m.invalidateSize(), 150);
-}
-function iniciarGPS() {
-  if (!navigator.geolocation) return;
-  S.watchId = navigator.geolocation.watchPosition(p => {
-    const ll = [p.coords.latitude, p.coords.longitude];
-    S.pos = ll;
-    if (!S.mapa) return;
-    if (!S.yo) {
-      S.yo = L.circleMarker(ll, { radius: 9, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(S.mapa);
-      S.yoPrec = L.circle(ll, { radius: p.coords.accuracy, color: '#2563eb', weight: 1, fillOpacity: 0.1 }).addTo(S.mapa);
-    } else { S.yo.setLatLng(ll); S.yoPrec.setLatLng(ll).setRadius(p.coords.accuracy); }
-    const g = $('#gps-estado');
-    if (g) g.textContent = `Su posición: ${ll[0].toFixed(5)}, ${ll[1].toFixed(5)} (±${Math.round(p.coords.accuracy)} m)`;
-  }, () => { const g = $('#gps-estado'); if (g) g.textContent = 'No se pudo obtener su ubicación. Active el GPS.'; },
-  { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
-}
-function detenerMapa() {
-  if (S.watchId != null) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
-  if (S.mapa) { S.mapa.remove(); S.mapa = null; }
-  S.yo = null; S.yoPrec = null;
-}
 function renderMapaEst() {
-  $('#est-contenido').innerHTML = `<div id="mapa" class="h-[62vh] rounded-2xl overflow-hidden border"></div>
-    <button data-accion="centrar" class="w-full bg-white border font-semibold py-2.5 rounded-xl">📍 Centrar en mi posición</button>
+  $('#est-contenido').innerHTML = `<div id="mapa" class="h-[62vh] rounded-3xl overflow-hidden border shadow" style="isolation:isolate"></div>
+    <button data-accion="centrar" class="w-full bg-white border font-semibold py-2.5 rounded-2xl">📍 Centrar en mi posición</button>
     <p id="gps-estado" class="text-xs text-slate-500 text-center">Buscando su ubicación…</p>`;
-  crearMapa('mapa', S.datos.puntos, true);
+  const foco = S.foco; S.foco = null;
+  crearMapa('mapa', S.datos.puntos, {
+    seguir: true, foco,
+    popup: p => {
+      const as = S.datos.actividades.filter(x => x.punto_id === p.id).map(x => '• ' + esc(x.titulo)).join('<br>');
+      return `<b>${esc(p.nombre)}</b><br>${esc(p.descripcion || '')}${as ? '<br><br><b>Actividades:</b><br>' + as : ''}`;
+    }
+  });
 }
 
 /* =========================================================
@@ -514,77 +618,14 @@ document.addEventListener('click', async e => {
     switch (a) {
       case 'cerrar-modal': return cerrarModal();
       case 'tab-est': S.tab = b.dataset.tab; return renderContenidoEst();
-      case 'tab-doc': S.tabDoc = b.dataset.tab; return renderDocente();
-      case 'responder': return abrirResponder(id);
-      case 'enviar-resp': return enviarRespuestaUI(id);
-      case 'centrar': if (S.pos && S.mapa) S.mapa.setView(S.pos, 17); else aviso('Aún no tenemos su ubicación.', 'error'); return;
-      case 'nueva-act': return formActividad();
-      case 'editar-act': return formActividad(id);
-      case 'borrar-act':
-        if (!confirm('¿Eliminar esta actividad? Las respuestas ya enviadas se conservan en la planilla.')) return;
-        cargando(true); await api('eliminarActividad', { id }); await cargarPanel(); return renderDocente();
-      case 'nuevo-punto': return formPunto();
-      case 'editar-punto': return formPunto(id);
-      case 'borrar-punto':
-        if (!confirm('¿Eliminar este punto?')) return;
-        cargando(true); await api('eliminarPunto', { id }); await cargarPanel(); return renderDocente();
-      case 'ia-uno': return iaUna(id, false);
-      case 'aprobar-ia': return guardarEval(id, true);
-      case 'guardar-eval': return guardarEval(id, false);
-      case 'ia-todas': return iaTodas();
-      case 'ver-foto': {
-        cargando(true, 'Cargando fotografía…');
-        const u = await dataUrlArchivo(id); cargando(false);
-        return modal(`<div class="pt-4"><img src="${u}" class="w-full rounded-xl" alt="Fotografía"></div>`);
-      }
-      case 'rep-ind': return reporteIndividual($('#sel-est').value);
-      case 'rep-gen': return reporteGeneral();
-      case 'rep-csv': return exportarCSV();
-      case 'subir-insignia': {
-        const f = $('#inp-insignia').files[0];
-        if (!f) return aviso('Elija una imagen.', 'error');
-        cargando(true, 'Subiendo…');
-        await api('subirInsignia', { imagenB64: await redimensionarPNG(f) });
-        await cargarInsignia(); renderAjustes(); cargando(false); aviso('Insignia actualizada.'); return;
-      }
-      case 'plantilla-xlsx': {
-        if (typeof XLSX === 'undefined') return aviso('No se pudo cargar el lector de Excel. Revise su conexión y recargue.', 'error');
-        const ws = XLSX.utils.aoa_to_sheet([['RUT', 'NOMBRE COMPLETO', 'CURSO'], ['12.345.678-5', 'Ana Pérez Soto', '3° Medio A']]);
-        ws['!cols'] = [{ wch: 16 }, { wch: 38 }, { wch: 16 }];
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Nómina');
-        XLSX.writeFile(wb, 'nomina_estudiantes.xlsx');
+      case 'ver-punto': S.tab = 'mapa'; S.foco = b.dataset.punto; window.scrollTo(0, 0); return renderContenidoEst();
+      case 'responder': return await abrirResponder(id);
+      case 'enviar-resp': return await enviarRespuestaUI(id);
+      case 'centrar':
+        if (S.pos && S.mapa) S.mapa.setView(S.pos, 17); else aviso('Aún no tenemos su ubicación.', 'error');
         return;
-      }
-      case 'leer-xlsx': {
-        const f = $('#inp-xlsx').files[0];
-        if (!f) return aviso('Elija primero el archivo de Excel.', 'error');
-        if (typeof XLSX === 'undefined') return aviso('No se pudo cargar el lector de Excel. Revise su conexión y recargue.', 'error');
-        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-        const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
-        const ok = [], mal = [];
-        filas.forEach((r, i) => {
-          const r0 = String(r[0] || '').trim(), nom = String(r[1] || '').trim(), cur = String(r[2] || '').trim();
-          if (!r0 && !nom && !cur) return;
-          if (i === 0 && /rut/i.test(r0)) return;
-          const rut = normalizarRut(r0);
-          if (!rut || !nom || !cur) mal.push('Fila ' + (i + 1) + ': ' + (nom || r0 || '(vacía)'));
-          else ok.push(rut + ';' + nom + ';' + cur);
-        });
-        $('#inp-est').value = ok.join('\n');
-        $('#xlsx-avisos').innerHTML =
-          `<p class="text-emerald-700 font-semibold">✔ ${ok.length} estudiante(s) listo(s) para importar.</p>` +
-          (mal.length ? `<p class="text-rose-700 font-semibold mt-1">⚠ ${mal.length} fila(s) con RUT inválido o datos incompletos (no se incluyeron):</p><ul class="list-disc pl-5 text-rose-700">${mal.map(m => `<li>${esc(m)}</li>`).join('')}</ul>` : '');
-        return;
-      }
-      case 'importar-est': {
-        const filas = $('#inp-est').value.split('\n').map(l => l.split(/[;\t]/).map(s => s.trim())).filter(c => c.length >= 3 && c[0])
-          .map(c => ({ rut: c[0], nombre: c[1], curso: c[2] }));
-        if (!filas.length) return aviso('No se encontraron líneas válidas.', 'error');
-        cargando(true, 'Importando…');
-        const d = await api('importarEstudiantes', { filas });
-        await cargarPanel(); renderDocente(); aviso(d.agregados + ' estudiante(s) agregado(s).'); return;
-      }
+      default:
+        if (typeof accionDocente === 'function') return await accionDocente(a, b, id);
     }
   } catch (err) { cargando(false); aviso(err.message, 'error'); }
 });
@@ -631,10 +672,10 @@ async function iniciar() {
   window.addEventListener('online', () => { actualizarRed(); sincronizar(); });
   window.addEventListener('offline', actualizarRed);
   cargarInsignia();
-  localStorage.removeItem('sesion'); // sesión de versiones anteriores
-  // Refresca los estados "abierta/cerrada" cada 30 s
+  localStorage.removeItem('sesion');
+  // Refresca la cuenta regresiva y los estados cada 30 s
   setInterval(() => {
-    if (S.rol === 'estudiante' && !$('#pantalla-estudiante').classList.contains('hidden') && S.tab !== 'mapa' && $('#modal').classList.contains('hidden')) renderContenidoEst();
+    if (S.rol === 'estudiante' && S.datos && !$('#pantalla-estudiante').classList.contains('hidden') && S.tab !== 'mapa' && $('#modal').classList.contains('hidden')) renderContenidoEst();
   }, 30000);
 
   let s = null;
