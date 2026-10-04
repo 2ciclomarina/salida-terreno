@@ -33,6 +33,47 @@ const estActivos = () => S.panel.estudiantes.filter(e => String(e.activo).toLowe
 const tieneIA = r => r.puntaje_ia !== '' && r.puntaje_ia != null;
 const hayParteManual = a => a.tipo !== 'alternativas' && (a.tipo !== 'grupo' || (a.partes || []).some(p => p.tipo !== 'alternativas'));
 
+/* ---------- Rúbrica: cálculo y datos ---------- */
+const FACTOR_NIVEL = { L: 1, M: 0.5, N: 0 };
+function puntajeRubrica(rubrica, niveles, max) {
+  let tot = 0, ganado = 0;
+  rubrica.forEach((c, i) => {
+    const w = Number(c.peso) > 0 ? Number(c.peso) : 1;
+    tot += w;
+    ganado += w * (FACTOR_NIVEL[niveles[i]] || 0);
+  });
+  return tot ? Math.round(max * ganado / tot * 10) / 10 : 0;
+}
+// Ítems con rúbrica de una actividad (la actividad completa o cada parte con rúbrica)
+function itemsRub(a) {
+  if (a.tipo === 'grupo') {
+    return (a.partes || []).map((p, i) => ({
+      id: p.id, etiqueta: 'Parte ' + (i + 1) + ' · ' + TIPOS[p.tipo].nom,
+      rubrica: p.tipo === 'alternativas' ? [] : (p.rubrica || []), max: Number(p.puntaje) || 1
+    })).filter(x => x.rubrica.length);
+  }
+  if ((a.tipo === 'desarrollo' || a.tipo === 'foto') && (a.rubrica || []).length) {
+    return [{ id: 'main', etiqueta: 'Rúbrica', rubrica: a.rubrica, max: Number(a.puntaje_max) || 1 }];
+  }
+  return [];
+}
+// ¿Hay algo para corregir a mano que no tenga rúbrica?
+function sinRubrica(a) {
+  if (a.tipo === 'grupo') return (a.partes || []).some(p => p.tipo !== 'alternativas' && !(p.rubrica || []).length);
+  if (a.tipo === 'desarrollo' || a.tipo === 'foto') return !(a.rubrica || []).length;
+  return false;
+}
+function autoPuntos(a, r) {
+  if (a.tipo !== 'grupo') return 0;
+  const resp = jsonSeguro(r.respuesta, {});
+  return (a.partes || []).reduce((s, p) => s + (p.tipo === 'alternativas' && String(resp[p.id] || '').trim() === String(p.correcta).trim() ? (Number(p.puntaje) || 1) : 0), 0);
+}
+function textoRubrica(rub) {
+  if (!rub || !rub.length) return '';
+  return '<div class="mt-1"><b>Rúbrica:</b>' + rub.map(c => `<div class="ml-2 mt-1"><b>${esc(c.criterio)}</b> (peso ${esc(c.peso || 1)})<br>
+    ✅ ${esc(c.logrado || '—')}<br>🟡 ${esc(c.medio || '—')}<br>⚪ ${esc(c.no || '—')}</div>`).join('') + '</div>';
+}
+
 function calcularEstudiantes() {
   const P = S.panel;
   const maxTotal = P.actividades.reduce((s, a) => s + Number(a.puntaje_max || 0), 0);
@@ -91,6 +132,7 @@ function renderActividades() {
     const pt = P.puntos.find(p => p.id === a.punto_id);
     const pct = nEst ? Math.round(n / nEst * 100) : 0;
     const nPartes = a.tipo === 'grupo' ? ` · ${(a.partes || []).length} partes` : '';
+    const nRub = itemsRub(a).reduce((s, x) => s + x.rubrica.length, 0);
     return `<div class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
       <div class="w-2 bg-${T.c}-500"></div>
       <div class="p-4 flex-1 min-w-0">
@@ -103,6 +145,7 @@ function renderActividades() {
         <div class="mt-2 text-xs text-slate-600 space-y-0.5">
           <div>🕒 ${fechaCorta(a.fecha_inicio)} → ${fechaCorta(a.fecha_fin)}</div>
           ${pt ? `<div>📍 ${esc(pt.nombre)}</div>` : ''}
+          ${nRub ? `<div>📋 Rúbrica con ${nRub} criterio(s)</div>` : ''}
           <div>${a.requiere_gps === 'no' ? '🚫 Sin GPS' : '📡 Registra ubicación'}</div>
         </div>
         <div class="mt-3"><div class="flex justify-between text-xs text-slate-600 mb-1"><span>Respondieron</span><span>${n} de ${nEst}</span></div>
@@ -122,20 +165,23 @@ function renderActividades() {
 
 function parteNueva(t) {
   t = t || 'alternativas';
-  return { tipo: t, enunciado: '', opciones: t === 'alternativas' ? ['', '', '', ''] : [], corrIdx: 0, pauta: '', puntaje: 1 };
+  return { tipo: t, enunciado: '', opciones: t === 'alternativas' ? ['', '', '', ''] : [], corrIdx: 0, pauta: '', puntaje: 1, rubrica: [] };
 }
+const critNuevo = () => ({ criterio: '', logrado: '', medio: '', no: '', peso: 1 });
 
 function formActividad(id) {
   const ahora = new Date(), fin = new Date(Date.now() + 2 * 3600e3);
-  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: [], partes: [], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
+  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: [], partes: [], rubrica: [], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
   let ops = (a.opciones && a.opciones.length) ? a.opciones.slice() : ['', '', '', ''];
   let corr = a.correcta ? Math.max(0, ops.indexOf(a.correcta)) : 0;
+  let rubM = (a.rubrica || []).map(c => Object.assign({ peso: 1 }, c));
   let partes = (a.tipo === 'grupo' && a.partes && a.partes.length)
     ? a.partes.map(p => ({
       tipo: p.tipo, enunciado: p.enunciado || '',
       opciones: (p.opciones && p.opciones.length) ? p.opciones.slice() : (p.tipo === 'alternativas' ? ['', '', '', ''] : []),
       corrIdx: p.correcta ? Math.max(0, (p.opciones || []).indexOf(p.correcta)) : 0,
-      pauta: p.pauta || '', puntaje: p.puntaje || 1
+      pauta: p.pauta || '', puntaje: p.puntaje || 1,
+      rubrica: (p.rubrica || []).map(c => Object.assign({ peso: 1 }, c))
     }))
     : [parteNueva('alternativas')];
   const inp = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
@@ -145,6 +191,21 @@ function formActividad(id) {
       <div class="rounded-2xl border-2 border-slate-200 p-3 text-center peer-checked:border-indigo-600 peer-checked:bg-indigo-50 transition h-full">
       <div class="text-3xl">${ic}</div><div class="font-bold text-sm">${t}</div><div class="text-[11px] text-slate-500">${d}</div></div></label>`).join('');
   const optTipo = t => ['alternativas', 'desarrollo', 'foto'].map(v => `<option value="${v}" ${t === v ? 'selected' : ''}>${TIPOS[v].ic} ${TIPOS[v].nom}</option>`).join('');
+  // Editor de rúbrica (k = 'm' para la actividad, 'p0', 'p1'... para cada parte)
+  const htmlRub = (arr, k) => `<div class="rounded-2xl border border-indigo-200 bg-white p-3 space-y-2">
+    <div class="flex flex-wrap items-center gap-2"><span class="text-sm font-bold">📋 Rúbrica</span>
+      <button type="button" data-rubia="${k}" class="ml-auto px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-semibold">✨ Sugerir con IA</button></div>
+    <p class="text-[11px] text-slate-500">Niveles: Logrado, Medianamente logrado y No observado. Escriba sus criterios o pida sugerencias a la IA y corríjalas. El peso (1 a 5) indica cuánto vale cada criterio.</p>
+    ${arr.map((c, i) => `<div class="rounded-xl border bg-slate-50 p-2 space-y-1">
+      <div class="flex gap-2 items-center">
+        <input data-rk="${k}" data-ri="${i}" data-rf="criterio" value="${esc(c.criterio)}" placeholder="Criterio (ej: Describe lo que observa)" class="${inp} flex-1">
+        <label class="text-[11px] flex items-center gap-1 shrink-0">Peso<input data-rk="${k}" data-ri="${i}" data-rf="peso" type="number" min="1" max="5" step="1" value="${esc(c.peso || 1)}" class="w-12 border rounded-lg px-1 py-1 bg-white"></label>
+        <button type="button" data-rubdel="${k}:${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar criterio">×</button></div>
+      <input data-rk="${k}" data-ri="${i}" data-rf="logrado" value="${esc(c.logrado)}" placeholder="✅ Logrado: qué se observa" class="${inp}">
+      <input data-rk="${k}" data-ri="${i}" data-rf="medio" value="${esc(c.medio)}" placeholder="🟡 Medianamente logrado: qué se observa" class="${inp}">
+      <input data-rk="${k}" data-ri="${i}" data-rf="no" value="${esc(c.no)}" placeholder="⚪ No observado: qué se observa" class="${inp}">
+    </div>`).join('')}
+    <button type="button" data-rubadd="${k}" class="text-sm font-semibold text-indigo-700">+ Agregar criterio</button></div>`;
 
   modal(`<form id="f-act" class="space-y-3 pt-2">
     <h3 class="text-lg font-extrabold pr-6">${id ? 'Editar' : 'Nueva'} actividad</h3>
@@ -159,13 +220,14 @@ function formActividad(id) {
 
     <div id="bloque-alt" class="space-y-2">
       ${sec(3, 'Alternativas')}
-      <p class="text-xs text-slate-500">Marque con el círculo verde la alternativa correcta.</p>
+      <p class="text-xs text-slate-500">Marque con el círculo verde la alternativa correcta. Se corrige sola al enviar el estudiante.</p>
       <div id="ops-lista" class="space-y-2"></div>
       <button type="button" id="ops-mas" class="text-sm font-semibold text-indigo-700">+ Agregar alternativa</button>
     </div>
-    <div id="bloque-pauta">
-      ${sec(3, 'Pauta de corrección')}
-      <textarea name="pauta" rows="3" class="${inp} mt-2" placeholder="¿Qué debe incluir una buena respuesta? La IA usa esto para sugerir el puntaje.">${esc(a.pauta || '')}</textarea>
+    <div id="bloque-pauta" class="space-y-2">
+      ${sec(3, 'Rúbrica de evaluación')}
+      <div id="rub-main"></div>
+      <textarea name="pauta" rows="2" class="${inp}" placeholder="Respuesta esperada o indicaciones para la IA (opcional si usa rúbrica)">${esc(a.pauta || '')}</textarea>
     </div>
     <div id="bloque-grupo" class="space-y-2">
       ${sec(3, 'Partes del ejercicio')}
@@ -211,6 +273,7 @@ function formActividad(id) {
   </form>`);
 
   const f = $('#f-act');
+  const getRub = k => k === 'm' ? rubM : (partes[+k.slice(1)] || {}).rubrica;
 
   const pintarOps = () => {
     $('#ops-lista').innerHTML = ops.map((o, i) => `<div class="flex items-center gap-2">
@@ -219,6 +282,7 @@ function formActividad(id) {
       <input data-op="${i}" value="${esc(o)}" placeholder="Alternativa ${String.fromCharCode(65 + i)}" class="${inp} flex-1">
       ${ops.length > 2 ? `<button type="button" data-borrar-op="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button>` : ''}</div>`).join('');
   };
+  const pintarRubMain = () => { $('#rub-main').innerHTML = htmlRub(rubM, 'm'); };
   const totalPts = () => {
     const t = partes.reduce((s, p) => s + (Number(p.puntaje) || 0), 0);
     const el = $('#partes-total');
@@ -237,7 +301,8 @@ function formActividad(id) {
           `<button type="button" data-addop="${i}" class="text-xs font-semibold text-indigo-700">+ Agregar alternativa</button>`;
       } else {
         cuerpo = (p.tipo === 'foto' ? '<p class="text-xs text-slate-500">📷 El estudiante subirá una fotografía en esta parte.</p>' : '') +
-          `<textarea data-pk="pauta" data-pi="${i}" rows="2" class="${inp}" placeholder="Pauta de corrección (qué debe incluir una buena respuesta)">${esc(p.pauta)}</textarea>`;
+          htmlRub(p.rubrica, 'p' + i) +
+          `<textarea data-pk="pauta" data-pi="${i}" rows="2" class="${inp}" placeholder="Respuesta esperada o indicaciones para la IA (opcional si usa rúbrica)">${esc(p.pauta)}</textarea>`;
       }
       return `<div class="rounded-2xl border-2 border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
         <div class="flex items-center gap-2">
@@ -253,7 +318,9 @@ function formActividad(id) {
     }).join('');
     totalPts();
   };
+  const repintarRub = k => (k === 'm' ? pintarRubMain() : pintarPartes());
   pintarOps();
+  pintarRubMain();
   pintarPartes();
 
   const alternar = () => {
@@ -266,6 +333,23 @@ function formActividad(id) {
     f.enunciado.required = t !== 'grupo';
   };
   alternar();
+
+  // La IA propone criterios y niveles; el docente los puede editar
+  const sugerirRub = async k => {
+    const esM = k === 'm', p = esM ? null : partes[+k.slice(1)];
+    const enun = (esM ? f.enunciado.value : p.enunciado).trim();
+    const tipo = esM ? f.tipo.value : p.tipo;
+    if (enun.length < 5) return aviso('Escriba primero la pregunta para que la IA pueda sugerir los criterios.', 'error');
+    const arr = getRub(k);
+    if (arr.some(c => c.criterio.trim()) && !confirm('¿Reemplazar los criterios actuales por la sugerencia de la IA?')) return;
+    cargando(true, 'La IA está preparando la rúbrica…');
+    try {
+      const d = await api('sugerirRubrica', { enunciado: enun, tipo, contexto: esM ? '' : f.enunciado.value.trim() });
+      arr.splice(0, arr.length, ...d.criterios);
+      repintarRub(k);
+      aviso('Rúbrica sugerida. Revísela y ajústela si lo desea.');
+    } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
+  };
 
   f.addEventListener('change', ev => {
     const t = ev.target;
@@ -281,6 +365,11 @@ function formActividad(id) {
   });
   f.addEventListener('input', ev => {
     const t = ev.target;
+    if (t.dataset.rf !== undefined) {
+      const c = (getRub(t.dataset.rk) || [])[+t.dataset.ri];
+      if (c) c[t.dataset.rf] = t.dataset.rf === 'peso' ? (Number(t.value) || 1) : t.value;
+      return;
+    }
     if (t.dataset.op !== undefined) { ops[+t.dataset.op] = t.value; return; }
     if (!t.dataset.pk || t.dataset.pk === 'tipo') return;
     const p = partes[+t.dataset.pi];
@@ -299,6 +388,12 @@ function formActividad(id) {
       return pintarOps();
     }
     if (T.id === 'ops-mas') { if (ops.length < 8) { ops.push(''); pintarOps(); } return; }
+    const ra = T.closest('[data-rubadd]');
+    if (ra) { const arr = getRub(ra.dataset.rubadd); if (arr && arr.length < 8) { arr.push(critNuevo()); repintarRub(ra.dataset.rubadd); } return; }
+    const rd = T.closest('[data-rubdel]');
+    if (rd) { const [k, i] = rd.dataset.rubdel.split(':'); getRub(k).splice(+i, 1); return repintarRub(k); }
+    const ria = T.closest('[data-rubia]');
+    if (ria) return sugerirRub(ria.dataset.rubia);
     const ap = T.closest('[data-addparte]');
     if (ap) { partes.push(parteNueva(ap.dataset.addparte)); return pintarPartes(); }
     const dp = T.closest('[data-delparte]');
@@ -325,6 +420,12 @@ function formActividad(id) {
       f.fecha_fin.value = aLocalInput(fn.toISOString());
     }
   });
+
+  const limpiaR = arr => (arr || []).map(c => ({
+    criterio: String(c.criterio || '').trim(), logrado: String(c.logrado || '').trim(),
+    medio: String(c.medio || '').trim(), no: String(c.no || '').trim(),
+    peso: Number(c.peso) > 0 ? Number(c.peso) : 1
+  })).filter(c => c.criterio);
 
   f.onsubmit = async ev => {
     ev.preventDefault();
@@ -355,6 +456,7 @@ function formActividad(id) {
           opciones: p.tipo === 'alternativas' ? o.filter(Boolean) : [],
           correcta: p.tipo === 'alternativas' ? o[p.corrIdx] : '',
           pauta: p.tipo === 'alternativas' ? '' : (p.pauta || '').trim(),
+          rubrica: p.tipo === 'alternativas' ? [] : limpiaR(p.rubrica),
           puntaje: Number(p.puntaje) || 1
         };
       });
@@ -372,6 +474,7 @@ function formActividad(id) {
           id: id || '', titulo: d.get('titulo').trim(), tipo, enunciado: String(d.get('enunciado') || '').trim(),
           opciones, correcta, partes: partesOut,
           pauta: (tipo === 'desarrollo' || tipo === 'foto') ? String(d.get('pauta') || '').trim() : '',
+          rubrica: (tipo === 'desarrollo' || tipo === 'foto') ? limpiaR(rubM) : [],
           puntaje_max: pmax, fecha_inicio: ini.toISOString(), fecha_fin: fin2.toISOString(),
           punto_id: d.get('punto_id'), imagen_id: a.imagen_id || '', orden: a.orden || '',
           requiere_gps: d.get('requiere_gps') ? 'si' : 'no'
@@ -490,6 +593,7 @@ function renderRespuestas() {
           <option value="pendientes" ${f.estado === 'pendientes' ? 'selected' : ''}>Por evaluar</option>
           <option value="evaluadas" ${f.estado === 'evaluadas' ? 'selected' : ''}>Ya evaluadas</option>
         </select>
+        <button data-accion="recargar" class="px-3 py-2 rounded-xl bg-slate-100 text-sm font-semibold">🔄 Actualizar</button>
         <button data-accion="ia-todas" class="ml-auto bg-slate-800 text-white text-sm font-semibold px-3 py-2 rounded-xl">🤖 Sugerir con IA las pendientes</button>
       </div>
     </div>
@@ -508,10 +612,10 @@ function bloqueActividad(a, est) {
     detalle = (a.enunciado ? `<p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>` : '') +
       (a.partes || []).map((p, i) => `<div class="mt-2 border-t pt-2"><b>Parte ${i + 1} (${TIPOS[p.tipo].nom}, ${esc(p.puntaje)} pt)</b>
         <p class="whitespace-pre-line">${esc(p.enunciado)}</p>
-        ${p.tipo === 'alternativas' ? `<p class="text-emerald-700 font-semibold">✔ Correcta: ${esc(p.correcta)}</p>` : (p.pauta ? `<p><b>Pauta:</b> ${esc(p.pauta)}</p>` : '')}</div>`).join('');
+        ${p.tipo === 'alternativas' ? `<p class="text-emerald-700 font-semibold">✔ Correcta: ${esc(p.correcta)}</p>` : (textoRubrica(p.rubrica) + (p.pauta ? `<p><b>Indicaciones:</b> ${esc(p.pauta)}</p>` : ''))}</div>`).join('');
   } else {
     detalle = `<p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>` +
-      (a.tipo === 'alternativas' ? `<p class="mt-2 text-emerald-700 font-semibold">✔ Correcta: ${esc(a.correcta)}</p>` : (a.pauta ? `<p class="mt-2"><b>Pauta:</b> ${esc(a.pauta)}</p>` : ''));
+      (a.tipo === 'alternativas' ? `<p class="mt-2 text-emerald-700 font-semibold">✔ Correcta: ${esc(a.correcta)}</p>` : (textoRubrica(a.rubrica) + (a.pauta ? `<p class="mt-2"><b>Indicaciones:</b> ${esc(a.pauta)}</p>` : '')));
   }
   return `<section>
     <div class="flex items-center gap-2 mb-2">
@@ -519,7 +623,7 @@ function bloqueActividad(a, est) {
       <h3 class="font-bold flex-1">${esc(a.titulo)}</h3>
       <span class="text-xs bg-white/90 rounded-full px-2 py-1 shadow">${todas.length}/${est.length} respondieron</span>
     </div>
-    <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y pauta'}</summary>${detalle}</details>
+    <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y rúbrica'}</summary>${detalle}</details>
     <div class="space-y-3">${rs.map(r => tarjetaResp(r, a)).join('') || '<div class="bg-white/80 rounded-2xl p-4 text-center text-slate-500 text-sm">No hay respuestas con este filtro.</div>'}</div>
     ${sin.length ? `<details class="mt-2 text-sm bg-amber-50 rounded-xl p-3"><summary class="cursor-pointer font-semibold text-amber-800">Sin responder (${sin.length})</summary>
       <ul class="mt-2 list-disc pl-5 text-slate-700">${sin.map(e => `<li>${esc(e.nombre)} <span class="text-xs text-slate-400">${esc(e.curso)}</span></li>`).join('')}</ul></details>` : ''}
@@ -551,6 +655,20 @@ function detalleGrupo(a, r) {
       <div class="text-xs text-slate-500 mb-1 whitespace-pre-line">${esc(p.enunciado)}</div>${cuerpo}</div>`;
   }).join('');
 }
+// Selectores de nivel (Logrado / Medianamente logrado / No observado) por criterio
+function bloqueRubricaEval(r, a) {
+  const its = itemsRub(a);
+  if (!its.length) return '';
+  const ev = jsonSeguro(r.evaluacion, {});
+  const html = its.map(it => `<div class="rounded-xl bg-indigo-50/60 border border-indigo-100 p-2 space-y-1">
+    <div class="text-xs font-bold text-indigo-800">📋 ${esc(it.etiqueta)} · ${esc(it.max)} pt</div>
+    ${it.rubrica.map((c, i) => `<div class="flex items-center gap-2 text-sm"><span class="flex-1">${esc(c.criterio)}</span>
+      <select data-niv="${esc(it.id)}" data-ci="${i}" class="border rounded-lg px-2 py-1 text-xs bg-white">
+        <option value="">Elegir nivel…</option>
+        ${[['L', 'Logrado'], ['M', 'Medianamente logrado'], ['N', 'No observado']].map(([v, t]) => `<option value="${v}" ${((ev[it.id] || [])[i] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}
+      </select></div>`).join('')}</div>`).join('');
+  return html + (sinRubrica(a) ? '<p class="text-xs text-slate-500">Hay partes sin rúbrica: complete a mano el puntaje total.</p>' : '');
+}
 function tarjetaResp(r, a) {
   const alt = a.tipo === 'alternativas', grupo = a.tipo === 'grupo';
   const ok = alt && String(r.respuesta).trim() === String(a.correcta).trim();
@@ -574,29 +692,57 @@ function tarjetaResp(r, a) {
     ${caja}
     ${!grupo && r.foto_id ? `<button data-accion="ver-foto" data-id="${esc(r.foto_id)}" class="text-sm underline text-teal-700">📷 Ver fotografía</button>` : ''}
     ${enlacesUbicacion(r)}
+    ${bloqueRubricaEval(r, a)}
     <div class="flex flex-wrap gap-2 items-start">
-      <input data-campo="puntaje" type="number" step="0.5" min="0" max="${esc(a.puntaje_max)}" value="${esc(p0)}" placeholder="Pts" class="${inp} w-24">
+      <input data-campo="puntaje" type="number" step="0.1" min="0" max="${esc(a.puntaje_max)}" value="${esc(p0)}" placeholder="Pts" class="${inp} w-24">
       <textarea data-campo="retro" rows="2" placeholder="Comentario breve para el estudiante" class="${inp} flex-1 min-w-[12rem]">${esc(c0)}</textarea>
     </div>
     ${grupo && r.estado !== 'evaluada' ? '<p class="text-xs text-slate-500">El puntaje de las alternativas ya está sumado. Complete el de las partes de desarrollo y fotografía, o use la IA.</p>' : ''}
     ${tieneIA(r) ? `<p class="text-xs text-indigo-600">🤖 Sugerencia de la IA: ${esc(r.puntaje_ia)} de ${esc(a.puntaje_max)} pt. Revísela antes de aprobar.</p>` : ''}
+    <p class="text-xs text-slate-500">Al guardar, el estudiante verá su puntaje, los niveles de la rúbrica y su comentario.</p>
     <div class="flex flex-wrap gap-2">
       ${manual ? `<button data-accion="ia-uno" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🤖 Sugerir con IA</button>` : ''}
       ${manual && tieneIA(r) ? `<button data-accion="aprobar-ia" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">✔ Aprobar sugerencia</button>` : ''}
       <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button>
     </div></article>`;
 }
+// Al cambiar un nivel de la rúbrica, el puntaje se recalcula solo (si todos los criterios tienen nivel)
+function recalcularCard(sel) {
+  const card = sel.closest('article');
+  if (!card) return;
+  const r = S.panel.respuestas.find(x => x.id === card.id.replace(/^ev-/, ''));
+  if (!r) return;
+  const a = actPor(r.actividad_id);
+  const its = itemsRub(a);
+  if (!its.length || sinRubrica(a)) return;
+  const niv = {};
+  $$('[data-niv]', card).forEach(s => { (niv[s.dataset.niv] = niv[s.dataset.niv] || [])[+s.dataset.ci] = s.value; });
+  let total = autoPuntos(a, r);
+  for (const x of its) {
+    const arr = Array.from(niv[x.id] || [], v => v || '');
+    if (arr.length < x.rubrica.length || arr.some(v => !v)) return;
+    total += puntajeRubrica(x.rubrica, arr, x.max);
+  }
+  const campo = $('[data-campo=puntaje]', card);
+  if (campo) campo.value = Math.round(total * 10) / 10;
+}
+document.addEventListener('change', e => {
+  if (e.target && e.target.dataset && e.target.dataset.niv !== undefined) recalcularCard(e.target);
+});
+
 async function iaUna(id, silencioso) {
   const r = S.panel.respuestas.find(x => x.id === id);
   if (!silencioso) cargando(true, 'Consultando a la IA…');
   try {
     const d = await api('evaluarIA', { respuesta_id: id });
     r.puntaje_ia = d.puntaje; r.comentario_ia = d.comentario;
+    r.evaluacion = JSON.stringify(d.evaluacion || {});
     if (!silencioso) redibujar();
   } finally { if (!silencioso) cargando(false); }
 }
 async function guardarEval(id, usarIA) {
   const r = S.panel.respuestas.find(x => x.id === id);
+  const ev = Object.assign({}, jsonSeguro(r.evaluacion, {}));
   let puntaje, retro;
   if (usarIA) {
     if (!tieneIA(r)) return aviso('Primero pida la sugerencia de la IA.', 'error');
@@ -606,12 +752,18 @@ async function guardarEval(id, usarIA) {
     puntaje = $('[data-campo=puntaje]', card).value;
     retro = $('[data-campo=retro]', card).value.trim();
     if (puntaje === '') return aviso('Indique el puntaje.', 'error');
+    const grupos = {};
+    $$('[data-niv]', card).forEach(s => { (grupos[s.dataset.niv] = grupos[s.dataset.niv] || [])[+s.dataset.ci] = s.value; });
+    Object.keys(grupos).forEach(k => {
+      const arr = Array.from(grupos[k], v => v || '');
+      if (arr.some(v => v)) ev[k] = arr.map(v => v || 'N');
+    });
   }
   cargando(true, 'Guardando…');
   try {
-    const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(puntaje), retro });
-    r.puntaje_final = d.puntaje_final; r.retro_docente = retro; r.estado = 'evaluada';
-    redibujar(); aviso('Evaluación guardada.');
+    const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(puntaje), retro, evaluacion: ev });
+    r.puntaje_final = d.puntaje_final; r.retro_docente = retro; r.estado = 'evaluada'; r.evaluacion = JSON.stringify(ev);
+    redibujar(); aviso('Evaluación guardada. El estudiante ya puede verla.');
   } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
 }
 async function iaTodas() {
@@ -623,7 +775,9 @@ async function iaTodas() {
   if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
   let n = 0;
   for (const r of rs) {
-    cargando(true, `Consultando a la IA (${++n}/${rs.length})…`);
+    n++;
+    if (n > 1) await new Promise(res => setTimeout(res, 2500)); // pausa para no pasar el límite por minuto de la IA
+    cargando(true, `Consultando a la IA (${n}/${rs.length})…`);
     try { await iaUna(r.id, true); } catch (e) { aviso(e.message, 'error'); break; }
   }
   cargando(false); redibujar();
@@ -804,6 +958,7 @@ async function accionDocente(a, b, id) {
       if (!confirm('¿Eliminar este punto?')) return;
       cargando(true); await api('eliminarPunto', { id }); await cargarPanel(); return renderDocente();
     case 'filtro-act': S.filtroR.act = id || ''; return redibujar();
+    case 'recargar': await cargarPanel(); return redibujar();
     case 'ia-uno': return iaUna(id, false);
     case 'aprobar-ia': return guardarEval(id, true);
     case 'guardar-eval': return guardarEval(id, false);
