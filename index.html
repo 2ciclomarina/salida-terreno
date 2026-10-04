@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f766e">
+  <title>Salida a Terreno</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .pin{width:28px;height:28px;border-radius:9999px;background:#0f766e;color:#fff;font-weight:700;font-size:13px;
+         display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+    #firma-canvas{touch-action:none}
+    .tab-activa{background:#0f766e;color:#fff}
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+  <!-- CABECERA -->
+  <header class="bg-teal-700 text-white sticky top-0 z-30 shadow">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
+      <img id="logo" alt="Insignia del colegio" class="hidden h-10 w-10 object-contain bg-white rounded-full p-0.5">
+      <h1 class="font-bold text-lg flex-1 leading-tight">Salida a Terreno</h1>
+      <span id="estado-red" class="text-xs px-2 py-1 rounded-full bg-emerald-500">En línea</span>
+      <span id="cola-contador" class="hidden text-xs px-2 py-1 rounded-full bg-amber-400 text-slate-900"></span>
+      <button id="btn-salir" class="hidden text-sm underline">Salir</button>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-5">
+
+    <!-- LOGIN -->
+    <section id="pantalla-login" class="hidden max-w-md mx-auto">
+      <div class="bg-white rounded-3xl shadow p-6 space-y-5">
+        <div class="text-center">
+          <div class="text-5xl">🧭</div>
+          <h2 class="text-2xl font-extrabold mt-2">Bienvenido(a)</h2>
+          <p class="text-slate-500 text-sm">Ingrese para comenzar su salida a terreno.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-sm font-semibold">
+          <button id="tab-login-est" class="py-2 rounded-xl tab-activa">Soy estudiante</button>
+          <button id="tab-login-doc" class="py-2 rounded-xl bg-slate-100">Soy docente</button>
+        </div>
+        <form id="form-estudiante" class="space-y-3">
+          <label class="block text-sm font-medium">Su RUT
+            <input id="inp-rut" inputmode="text" autocomplete="off" placeholder="12.345.678-9"
+                   class="mt-1 w-full border rounded-xl px-4 py-3 text-lg">
+          </label>
+          <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl">Ingresar</button>
+          <p class="text-xs text-slate-500">La primera vez necesita conexión a internet.</p>
+        </form>
+        <form id="form-docente" class="hidden space-y-3">
+          <label class="block text-sm font-medium">Contraseña
+            <input id="inp-clave" type="password" autocomplete="current-password"
+                   class="mt-1 w-full border rounded-xl px-4 py-3 text-lg">
+          </label>
+          <button class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl">Ingresar al panel</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- CARTA DE COMPROMISO -->
+    <section id="pantalla-carta" class="hidden">
+      <div class="bg-white rounded-3xl shadow p-6 space-y-4">
+        <h2 class="text-xl font-extrabold">📜 Carta de compromiso</h2>
+        <p class="text-sm text-slate-600">Antes de comenzar, lea con atención el reglamento de la salida a terreno.</p>
+        <ol class="list-decimal pl-5 space-y-2 text-sm">
+          <li>Usted permanecerá siempre con su grupo y bajo la supervisión de los docentes a cargo.</li>
+          <li>Seguirá las indicaciones de seguridad y no se alejará de las zonas autorizadas.</li>
+          <li>Cuidará el entorno natural y no dejará residuos.</li>
+          <li>Respetará a sus compañeros, a los docentes y a las personas del lugar.</li>
+          <li>Usará el teléfono solo para las actividades de la salida.</li>
+          <li>Responderá cada actividad dentro del horario indicado, con honestidad y con su propio trabajo.</li>
+          <li>Autoriza que la aplicación registre su ubicación y las fotografías que usted tome al responder.</li>
+        </ol>
+        <div>
+          <p class="text-sm font-medium mb-1">Firme con el dedo en el recuadro:</p>
+          <canvas id="firma-canvas" class="w-full h-40 border-2 border-dashed rounded-xl bg-slate-50"></canvas>
+          <button id="firma-limpiar" type="button" class="text-sm text-slate-600 underline mt-1">Borrar firma</button>
+        </div>
+        <label class="flex items-start gap-2 text-sm">
+          <input id="chk-acepto" type="checkbox" class="mt-1">
+          <span>He leído el reglamento y me comprometo a cumplirlo.</span>
+        </label>
+        <button id="btn-acepto" class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl disabled:opacity-40" disabled>Acepto</button>
+      </div>
+    </section>
+
+    <!-- ESTUDIANTE -->
+    <section id="pantalla-estudiante" class="hidden space-y-4">
+      <div id="est-info" class="bg-white rounded-2xl shadow p-4"></div>
+      <nav class="grid grid-cols-4 gap-1 bg-white rounded-2xl shadow p-1 text-xs sm:text-sm font-semibold">
+        <button data-accion="tab-est" data-tab="pendientes" class="py-2 rounded-xl">Pendientes</button>
+        <button data-accion="tab-est" data-tab="realizadas" class="py-2 rounded-xl">Realizadas</button>
+        <button data-accion="tab-est" data-tab="todas" class="py-2 rounded-xl">Todas</button>
+        <button data-accion="tab-est" data-tab="mapa" class="py-2 rounded-xl">🗺️ Mapa</button>
+      </nav>
+      <div id="est-contenido" class="space-y-3"></div>
+    </section>
+
+    <!-- DOCENTE -->
+    <section id="pantalla-docente" class="hidden space-y-4">
+      <nav id="doc-tabs" class="flex gap-1 overflow-x-auto bg-white rounded-2xl shadow p-1 text-sm font-semibold"></nav>
+      <div id="doc-contenido"></div>
+    </section>
+  </main>
+
+  <!-- MODAL -->
+  <div id="modal" class="hidden fixed inset-0 z-40 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5 relative">
+      <button data-accion="cerrar-modal" class="absolute right-4 top-3 text-2xl text-slate-400" aria-label="Cerrar">×</button>
+      <div id="modal-cuerpo"></div>
+    </div>
+  </div>
+
+  <!-- CARGANDO / AVISOS -->
+  <div id="cargando" class="hidden fixed inset-0 z-50 bg-white/70 flex items-center justify-center">
+    <div class="bg-white shadow-xl rounded-2xl px-6 py-4 flex items-center gap-3">
+      <div class="h-5 w-5 rounded-full border-4 border-teal-700 border-t-transparent animate-spin"></div>
+      <span id="cargando-msg" class="text-sm font-medium">Cargando…</span>
+    </div>
+  </div>
+  <div id="aviso" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-[92vw] px-4 py-3 rounded-xl text-white text-sm shadow-lg"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
