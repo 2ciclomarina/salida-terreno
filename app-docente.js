@@ -17,21 +17,25 @@ async function cargarPanel() {
     throw e;
   } finally { cargando(false); }
 }
-const TABS_DOC = [['resumen', '📊 Resumen'], ['actividades', '📝 Actividades'], ['puntos', '📍 Puntos'], ['ia', '🤖 Evaluación IA'], ['ubicaciones', '🧭 Ubicaciones'], ['reportes', '📄 Reportes'], ['ajustes', '⚙️ Ajustes']];
+const TABS_DOC = [['resumen', '📊 Resumen'], ['actividades', '📝 Actividades'], ['puntos', '📍 Puntos'], ['respuestas', '💬 Respuestas'], ['ubicaciones', '🧭 Ubicaciones'], ['reportes', '📄 Reportes'], ['ajustes', '⚙️ Ajustes']];
 function renderDocente() {
+  const porEvaluar = S.panel.respuestas.filter(r => r.estado !== 'evaluada').length;
   $('#doc-tabs').innerHTML = TABS_DOC.map(([k, t]) =>
-    `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}</button>`).join('');
+    `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}${k === 'respuestas' && porEvaluar ? ` <span class="ml-1 text-xs bg-amber-400 text-slate-900 rounded-full px-1.5">${porEvaluar}</span>` : ''}</button>`).join('');
   detenerMapa();
-  const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, ia: renderIA, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
+  const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
   f();
 }
+function redibujar() { const y = window.scrollY; renderDocente(); window.scrollTo(0, y); }
 const actPor = id => S.panel.actividades.find(a => a.id === id);
 const nombreDe = rut => { const e = S.panel.estudiantes.find(x => rutKey(x.rut) === rutKey(rut)); return e ? e.nombre : rut; };
+const estActivos = () => S.panel.estudiantes.filter(e => String(e.activo).toLowerCase() !== 'no');
+const tieneIA = r => r.puntaje_ia !== '' && r.puntaje_ia != null;
 
 function calcularEstudiantes() {
   const P = S.panel;
   const maxTotal = P.actividades.reduce((s, a) => s + Number(a.puntaje_max || 0), 0);
-  return P.estudiantes.filter(e => String(e.activo).toLowerCase() !== 'no').map(e => {
+  return estActivos().map(e => {
     const k = rutKey(e.rut);
     const rs = P.respuestas.filter(r => rutKey(r.rut) === k);
     const pts = rs.reduce((s, r) => s + (r.estado === 'evaluada' ? Number(r.puntaje_final || 0) : 0), 0);
@@ -43,7 +47,7 @@ function calcularEstudiantes() {
   }).sort((a, b) => a.est.nombre.localeCompare(b.est.nombre, 'es'));
 }
 
-/* Resumen */
+/* ---------- Resumen ---------- */
 function renderResumen() {
   const P = S.panel, est = calcularEstudiantes(), nAct = P.actividades.length;
   const entregas = est.length && nAct ? Math.round(est.reduce((s, e) => s + e.respondidas, 0) / (est.length * nAct) * 100) : 0;
@@ -71,73 +75,164 @@ function renderResumen() {
     </div>`;
 }
 
-/* Actividades */
+/* ---------- Actividades ---------- */
+function estadoActividad(a) {
+  const t = Date.now();
+  if (t < Date.parse(a.fecha_inicio)) return chip('Programada', 'slate');
+  if (t > Date.parse(a.fecha_fin)) return chip('Cerrada', 'rose');
+  return chip('Abierta', 'emerald');
+}
 function renderActividades() {
-  const P = S.panel;
+  const P = S.panel, nEst = estActivos().length;
+  const tarjetas = P.actividades.map((a, i) => {
+    const T = TIPOS[a.tipo] || TIPOS.desarrollo;
+    const n = P.respuestas.filter(r => r.actividad_id === a.id).length;
+    const pt = P.puntos.find(p => p.id === a.punto_id);
+    const pct = nEst ? Math.round(n / nEst * 100) : 0;
+    return `<div class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
+      <div class="w-2 bg-${T.c}-500"></div>
+      <div class="p-4 flex-1 min-w-0">
+        <div class="flex items-start gap-3">
+          <div class="h-11 w-11 shrink-0 rounded-2xl bg-${T.c}-100 flex items-center justify-center text-2xl">${T.ic}</div>
+          <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${i + 1}. ${esc(a.titulo)}</div>
+            <div class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt</div></div>
+          ${estadoActividad(a)}
+        </div>
+        <div class="mt-2 text-xs text-slate-600 space-y-0.5">
+          <div>🕒 ${fechaCorta(a.fecha_inicio)} → ${fechaCorta(a.fecha_fin)}</div>
+          ${pt ? `<div>📍 ${esc(pt.nombre)}</div>` : ''}
+          <div>${a.requiere_gps === 'no' ? '🚫 Sin GPS' : '📡 Registra ubicación'}</div>
+        </div>
+        <div class="mt-3"><div class="flex justify-between text-xs text-slate-600 mb-1"><span>Respondieron</span><span>${n} de ${nEst}</span></div>
+          <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-2 bg-emerald-500" style="width:${pct}%"></div></div></div>
+        <div class="flex gap-2 mt-3 flex-wrap">
+          <button data-accion="ver-resp" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">💬 Ver respuestas</button>
+          <button data-accion="editar-act" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm">✏️ Editar</button>
+          <button data-accion="borrar-act" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-sm">Eliminar</button>
+        </div>
+      </div></div>`;
+  }).join('');
   $('#doc-contenido').innerHTML = `
     <div class="flex justify-between items-center mb-3"><h3 class="font-bold text-lg">Actividades</h3>
-      <button data-accion="nueva-act" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">+ Nueva</button></div>
-    <div class="space-y-3">${P.actividades.map(a => `
-      <div class="bg-white/95 rounded-2xl shadow p-4">
-        <div class="flex justify-between gap-2"><b>${esc(a.titulo)}</b>${chip(a.tipo, 'slate')}</div>
-        <p class="text-xs text-slate-500 mt-1">${fechaCorta(a.fecha_inicio)} → ${fechaCorta(a.fecha_fin)} · ${esc(a.puntaje_max)} pt${a.requiere_gps === 'no' ? ' · sin GPS' : ' · con GPS'}${a.punto_id && P.puntos.find(p => p.id === a.punto_id) ? ' · 📍 ' + esc(P.puntos.find(p => p.id === a.punto_id).nombre) : ''}</p>
-        <div class="flex gap-2 mt-3">
-          <button data-accion="editar-act" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-lg bg-slate-100 text-sm">Editar</button>
-          <button data-accion="borrar-act" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-sm">Eliminar</button>
-        </div></div>`).join('') || '<p class="text-slate-500">Aún no hay actividades.</p>'}</div>`;
+      <button data-accion="nueva-act" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">+ Nueva actividad</button></div>
+    <div class="space-y-3">${tarjetas || '<div class="bg-white/90 rounded-2xl p-8 text-center text-slate-500">Aún no hay actividades. Pinche «Nueva actividad» para crear la primera.</div>'}</div>`;
 }
+
 function formActividad(id) {
   const ahora = new Date(), fin = new Date(Date.now() + 2 * 3600e3);
-  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: ['', '', '', ''], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
-  const corr = a.tipo === 'alternativas' && a.correcta ? a.opciones.indexOf(a.correcta) + 1 : 1;
-  const inp = 'w-full border rounded-xl px-3 py-2';
-  modal(`<form id="f-act" class="space-y-3 pt-3">
+  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: [], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
+  let ops = (a.opciones && a.opciones.length) ? a.opciones.slice() : ['', '', '', ''];
+  let corr = a.correcta ? Math.max(0, ops.indexOf(a.correcta)) : 0;
+  const inp = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+  const sec = (n, t) => `<div class="flex items-center gap-2 pt-2"><span class="h-6 w-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">${n}</span><span class="font-bold text-sm">${t}</span></div>`;
+  const tiles = [['alternativas', '✅', 'Alternativas', 'Una respuesta correcta'], ['desarrollo', '✍️', 'Desarrollo', 'Respuesta escrita'], ['foto', '📷', 'Fotografía', 'El alumno sube una foto']]
+    .map(([v, ic, t, d]) => `<label class="cursor-pointer"><input type="radio" name="tipo" value="${v}" class="peer sr-only" ${a.tipo === v ? 'checked' : ''}>
+      <div class="rounded-2xl border-2 border-slate-200 p-3 text-center peer-checked:border-indigo-600 peer-checked:bg-indigo-50 transition h-full">
+      <div class="text-3xl">${ic}</div><div class="font-bold text-sm">${t}</div><div class="text-[11px] text-slate-500">${d}</div></div></label>`).join('');
+  modal(`<form id="f-act" class="space-y-3 pt-2">
     <h3 class="text-lg font-extrabold pr-6">${id ? 'Editar' : 'Nueva'} actividad</h3>
-    <label class="block text-sm">Título<input name="titulo" required class="${inp}" value="${esc(a.titulo || '')}"></label>
-    <label class="block text-sm">Tipo
-      <select name="tipo" class="${inp}">
-        ${[['alternativas', 'Opción múltiple'], ['desarrollo', 'Desarrollo'], ['foto', 'Fotografía']].map(([v, t]) => `<option value="${v}" ${a.tipo === v ? 'selected' : ''}>${t}</option>`).join('')}
-      </select></label>
-    <label class="block text-sm">Enunciado<textarea name="enunciado" rows="4" required class="${inp}">${esc(a.enunciado || '')}</textarea></label>
-    <div id="bloque-alt"><label class="block text-sm">Alternativas (una por línea)
-      <textarea name="opciones" rows="4" class="${inp}">${esc((a.opciones || []).join('\n'))}</textarea></label>
-      <label class="block text-sm mt-2">N° de la alternativa correcta<input name="correcta" type="number" min="1" value="${corr}" class="${inp}"></label></div>
-    <label id="bloque-pauta" class="block text-sm">Pauta de corrección (la IA la usa para sugerir puntaje)
-      <textarea name="pauta" rows="3" class="${inp}">${esc(a.pauta || '')}</textarea></label>
-    <div class="grid grid-cols-2 gap-3">
-      <label class="block text-sm">Puntaje máximo<input name="puntaje_max" type="number" step="0.5" min="0.5" value="${esc(a.puntaje_max)}" class="${inp}"></label>
-      <label class="block text-sm">Punto de visita
-        <select name="punto_id" class="${inp}"><option value="">(ninguno)</option>
-        ${S.panel.puntos.map(p => `<option value="${esc(p.id)}" ${a.punto_id === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
-      <label class="block text-sm">Abre<input name="fecha_inicio" type="datetime-local" required value="${aLocalInput(a.fecha_inicio)}" class="${inp}"></label>
-      <label class="block text-sm">Cierra<input name="fecha_fin" type="datetime-local" required value="${aLocalInput(a.fecha_fin)}" class="${inp}"></label>
+    ${sec(1, 'Tipo de pregunta')}
+    <div class="grid grid-cols-3 gap-2">${tiles}</div>
+
+    ${sec(2, 'Pregunta')}
+    <input name="titulo" required class="${inp}" placeholder="Título corto (ej: Observe el río)" value="${esc(a.titulo || '')}">
+    <textarea name="enunciado" rows="4" required class="${inp}" placeholder="Escriba aquí la pregunta o la instrucción para los estudiantes">${esc(a.enunciado || '')}</textarea>
+    <label class="block text-sm">🖼️ Imagen de apoyo (opcional)<input name="imagen" type="file" accept="image/*" class="${inp} mt-1"></label>
+
+    <div id="bloque-alt" class="space-y-2">
+      ${sec(3, 'Alternativas')}
+      <p class="text-xs text-slate-500">Marque con el círculo verde la alternativa correcta.</p>
+      <div id="ops-lista" class="space-y-2"></div>
+      <button type="button" id="ops-mas" class="text-sm font-semibold text-indigo-700">+ Agregar alternativa</button>
     </div>
-    <label class="block text-sm">Imagen de apoyo (opcional)<input name="imagen" type="file" accept="image/*" class="${inp}"></label>
-    <label class="flex items-center gap-2 text-sm bg-teal-50 rounded-xl p-3">
-      <input type="checkbox" name="requiere_gps" ${a.requiere_gps !== 'no' ? 'checked' : ''}>
-      <span>Registrar la ubicación (GPS) del estudiante al responder</span>
+    <div id="bloque-pauta">
+      ${sec(3, 'Pauta de corrección')}
+      <textarea name="pauta" rows="3" class="${inp} mt-2" placeholder="¿Qué debe incluir una buena respuesta? La IA usa esto para sugerir el puntaje.">${esc(a.pauta || '')}</textarea>
+    </div>
+
+    ${sec(4, 'Puntaje y lugar')}
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Puntaje máximo<input name="puntaje_max" type="number" step="0.5" min="0.5" value="${esc(a.puntaje_max)}" class="${inp} mt-1"></label>
+      <label class="block text-sm">📍 Punto de visita
+        <select name="punto_id" class="${inp} mt-1"><option value="">(ninguno)</option>
+        ${S.panel.puntos.map(p => `<option value="${esc(p.id)}" ${a.punto_id === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
+    </div>
+
+    ${sec(5, 'Horario')}
+    <div class="flex flex-wrap gap-2">
+      <button type="button" data-rapido="1" class="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold">Abrir ahora · 1 h</button>
+      <button type="button" data-rapido="2" class="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold">2 h</button>
+      <button type="button" data-rapido="3" class="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold">3 h</button>
+      <button type="button" data-rapido="dia" class="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold">Hasta el fin del día</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block text-sm">Abre<input name="fecha_inicio" type="datetime-local" required value="${aLocalInput(a.fecha_inicio)}" class="${inp} mt-1"></label>
+      <label class="block text-sm">Cierra<input name="fecha_fin" type="datetime-local" required value="${aLocalInput(a.fecha_fin)}" class="${inp} mt-1"></label>
+    </div>
+
+    <label class="flex items-center justify-between gap-3 bg-indigo-50 rounded-2xl p-3 cursor-pointer">
+      <span class="text-sm font-medium">📡 Registrar la ubicación (GPS) del estudiante al responder</span>
+      <span class="relative shrink-0">
+        <input type="checkbox" name="requiere_gps" class="peer sr-only" ${a.requiere_gps !== 'no' ? 'checked' : ''}>
+        <span class="block h-6 w-11 rounded-full bg-slate-300 peer-checked:bg-emerald-500 transition"></span>
+        <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+      </span>
     </label>
-    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl">Guardar</button>
+    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar actividad</button>
   </form>`);
+
   const f = $('#f-act');
+  const pintarOps = () => {
+    $('#ops-lista').innerHTML = ops.map((o, i) => `<div class="flex items-center gap-2">
+      <input type="radio" name="corr" value="${i}" ${i === corr ? 'checked' : ''} class="h-5 w-5 accent-emerald-600 shrink-0" title="Marcar como correcta">
+      <span class="h-8 w-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold text-sm">${String.fromCharCode(65 + i)}</span>
+      <input data-op="${i}" value="${esc(o)}" placeholder="Alternativa ${String.fromCharCode(65 + i)}" class="${inp} flex-1">
+      ${ops.length > 2 ? `<button type="button" data-borrar-op="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button>` : ''}</div>`).join('');
+  };
+  pintarOps();
   const alternar = () => {
     const t = f.tipo.value;
     $('#bloque-alt').classList.toggle('hidden', t !== 'alternativas');
     $('#bloque-pauta').classList.toggle('hidden', t === 'alternativas');
   };
-  f.tipo.onchange = alternar; alternar();
+  alternar();
+  f.addEventListener('change', ev => {
+    if (ev.target.name === 'tipo') alternar();
+    if (ev.target.name === 'corr') corr = +ev.target.value;
+  });
+  f.addEventListener('input', ev => {
+    if (ev.target.dataset.op !== undefined) ops[+ev.target.dataset.op] = ev.target.value;
+  });
+  f.addEventListener('click', ev => {
+    const bo = ev.target.closest('[data-borrar-op]');
+    if (bo) {
+      const i = +bo.dataset.borrarOp;
+      ops.splice(i, 1);
+      if (corr === i) corr = 0; else if (corr > i) corr--;
+      return pintarOps();
+    }
+    if (ev.target.id === 'ops-mas') { if (ops.length < 8) { ops.push(''); pintarOps(); } return; }
+    const q = ev.target.closest('[data-rapido]');
+    if (q) {
+      const ini = new Date(), fn = new Date();
+      if (q.dataset.rapido === 'dia') fn.setHours(23, 59, 0, 0); else fn.setTime(ini.getTime() + Number(q.dataset.rapido) * 3600e3);
+      f.fecha_inicio.value = aLocalInput(ini.toISOString());
+      f.fecha_fin.value = aLocalInput(fn.toISOString());
+    }
+  });
   f.onsubmit = async ev => {
     ev.preventDefault();
     const d = new FormData(f), tipo = d.get('tipo');
-    const opciones = String(d.get('opciones')).split('\n').map(s => s.trim()).filter(Boolean);
-    let correcta = '';
+    const limpias = ops.map(s => s.trim());
+    let correcta = '', opciones = [];
     if (tipo === 'alternativas') {
-      const n = +d.get('correcta');
-      if (opciones.length < 2 || !(n >= 1 && n <= opciones.length)) return aviso('Escriba al menos 2 alternativas e indique el número de la correcta.', 'error');
-      correcta = opciones[n - 1];
+      opciones = limpias.filter(Boolean);
+      correcta = limpias[corr] || '';
+      if (opciones.length < 2) return aviso('Escriba al menos 2 alternativas.', 'error');
+      if (!correcta) return aviso('Marque como correcta una alternativa que tenga texto.', 'error');
     }
-    const ini = new Date(d.get('fecha_inicio')), fin = new Date(d.get('fecha_fin'));
-    if (!(fin > ini)) return aviso('La hora de cierre debe ser posterior a la de apertura.', 'error');
+    const ini = new Date(d.get('fecha_inicio')), fin2 = new Date(d.get('fecha_fin'));
+    if (!(fin2 > ini)) return aviso('La hora de cierre debe ser posterior a la de apertura.', 'error');
     cargando(true, 'Guardando…');
     try {
       const file = d.get('imagen');
@@ -146,8 +241,8 @@ function formActividad(id) {
         imagenB64,
         actividad: {
           id: id || '', titulo: d.get('titulo').trim(), tipo, enunciado: d.get('enunciado').trim(),
-          opciones: tipo === 'alternativas' ? opciones : [], correcta, pauta: tipo === 'alternativas' ? '' : d.get('pauta').trim(),
-          puntaje_max: +d.get('puntaje_max'), fecha_inicio: ini.toISOString(), fecha_fin: fin.toISOString(),
+          opciones, correcta, pauta: tipo === 'alternativas' ? '' : String(d.get('pauta') || '').trim(),
+          puntaje_max: +d.get('puntaje_max'), fecha_inicio: ini.toISOString(), fecha_fin: fin2.toISOString(),
           punto_id: d.get('punto_id'), imagen_id: a.imagen_id || '', orden: a.orden || '',
           requiere_gps: d.get('requiere_gps') ? 'si' : 'no'
         }
@@ -157,47 +252,92 @@ function formActividad(id) {
   };
 }
 
-/* Puntos */
+/* ---------- Puntos (se marcan tocando el mapa) ---------- */
 function renderPuntos() {
   const P = S.panel;
   $('#doc-contenido').innerHTML = `
     <div class="grid md:grid-cols-2 gap-4">
       <div class="space-y-3">
         <div class="flex justify-between items-center"><h3 class="font-bold text-lg">Puntos de visita</h3>
-          <button data-accion="nuevo-punto" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">+ Nuevo</button></div>
+          <button data-accion="nuevo-punto" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">+ Nuevo punto</button></div>
         ${P.puntos.map((p, i) => `<div class="bg-white/95 rounded-2xl shadow p-4">
           <b>${i + 1}. ${esc(p.nombre)}</b><p class="text-sm text-slate-500">${esc(p.descripcion || '')}</p>
           <p class="text-xs text-slate-400">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}</p>
-          <div class="flex gap-2 mt-2"><button data-accion="editar-punto" data-id="${esc(p.id)}" class="px-3 py-1.5 rounded-lg bg-slate-100 text-sm">Editar</button>
-          <button data-accion="borrar-punto" data-id="${esc(p.id)}" class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-sm">Eliminar</button></div></div>`).join('') || '<p class="text-slate-500">Aún no hay puntos.</p>'}
+          <div class="flex gap-2 mt-2"><button data-accion="editar-punto" data-id="${esc(p.id)}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm">✏️ Editar</button>
+          <button data-accion="borrar-punto" data-id="${esc(p.id)}" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-sm">Eliminar</button></div></div>`).join('') || '<div class="bg-white/90 rounded-2xl p-6 text-center text-slate-500">Aún no hay puntos. Pinche «Nuevo punto» y toque el mapa.</div>'}
       </div>
-      <div id="mapa-docente" class="h-80 md:h-[28rem] rounded-2xl overflow-hidden border"></div>
+      <div id="mapa-docente" class="h-80 md:h-[28rem] rounded-2xl overflow-hidden border shadow" style="isolation:isolate"></div>
     </div>`;
-  crearMapa('mapa-docente', P.puntos, false);
+  crearMapa('mapa-docente', P.puntos, {});
 }
 function formPunto(id) {
   const p = id ? S.panel.puntos.find(x => x.id === id) : { nombre: '', descripcion: '', lat: '', lng: '' };
-  const inp = 'w-full border rounded-xl px-3 py-2';
-  modal(`<form id="f-punto" class="space-y-3 pt-3"><h3 class="text-lg font-extrabold pr-6">${id ? 'Editar' : 'Nuevo'} punto</h3>
-    <label class="block text-sm">Nombre<input name="nombre" required class="${inp}" value="${esc(p.nombre)}"></label>
-    <label class="block text-sm">Descripción<textarea name="descripcion" rows="2" class="${inp}">${esc(p.descripcion || '')}</textarea></label>
-    <div class="grid grid-cols-2 gap-3">
-      <label class="block text-sm">Latitud<input name="lat" required inputmode="decimal" class="${inp}" value="${esc(p.lat)}" placeholder="-36.83"></label>
-      <label class="block text-sm">Longitud<input name="lng" required inputmode="decimal" class="${inp}" value="${esc(p.lng)}" placeholder="-73.05"></label>
+  const inp = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+  modal(`<form id="f-punto" class="space-y-3 pt-2">
+    <h3 class="text-lg font-extrabold pr-6">${id ? 'Editar' : 'Nuevo'} punto de visita</h3>
+    <input name="nombre" required class="${inp}" placeholder="Nombre del lugar" value="${esc(p.nombre)}">
+    <textarea name="descripcion" rows="2" class="${inp}" placeholder="Descripción (opcional)">${esc(p.descripcion || '')}</textarea>
+    <div class="bg-indigo-50 rounded-2xl p-3 space-y-2">
+      <div class="text-sm font-semibold">📍 Marque el lugar en el mapa</div>
+      <div class="flex gap-2">
+        <input id="p-buscar" class="${inp} flex-1" placeholder="Buscar lugar o dirección (ej: Cerro Caracol, Concepción)">
+        <button type="button" id="p-ir" class="bg-teal-700 text-white font-semibold px-4 rounded-xl">Buscar</button>
+      </div>
+      <div id="mapa-punto" class="h-64 rounded-2xl overflow-hidden border" style="isolation:isolate"></div>
+      <p id="p-coord" class="text-xs text-slate-600">Toque el mapa para marcar el punto. Puede arrastrar el marcador para ajustarlo.</p>
+      <button type="button" id="btn-mi-pos" class="text-sm underline text-teal-700 font-semibold">📡 Usar mi ubicación actual</button>
     </div>
-    <button type="button" id="btn-mi-pos" class="text-sm underline text-teal-700">Usar mi ubicación actual</button>
-    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl">Guardar</button></form>`);
+    <input type="hidden" name="lat" value="${esc(p.lat)}"><input type="hidden" name="lng" value="${esc(p.lng)}">
+    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar punto</button>
+  </form>`);
   const f = $('#f-punto');
+  const c = capasBase();
+  const m = L.map('mapa-punto', { layers: [c.osm] });
+  L.control.layers({ 'Calles': c.osm, 'Topográfico (relieve)': c.topo, 'Topográfico Esri': c.esri }).addTo(m);
+  S.mapaModal = m;
+  // Los demás puntos ya creados, en gris
+  const otros = S.panel.puntos.filter(q => q.id !== id && isFinite(q.lat) && isFinite(q.lng));
+  otros.forEach(q => L.circleMarker([q.lat, q.lng], { radius: 6, color: '#64748b', fillColor: '#94a3b8', fillOpacity: 0.9 }).addTo(m).bindTooltip(q.nombre));
+  let mk = null;
+  const poner = (la, lo, zoom) => {
+    if (mk) mk.setLatLng([la, lo]);
+    else {
+      mk = L.marker([la, lo], { draggable: true }).addTo(m);
+      mk.on('dragend', () => { const q = mk.getLatLng(); poner(q.lat, q.lng); });
+    }
+    f.lat.value = la.toFixed(6); f.lng.value = lo.toFixed(6);
+    $('#p-coord').textContent = `✔ Punto marcado: ${la.toFixed(5)}, ${lo.toFixed(5)}`;
+    if (zoom) m.setView([la, lo], zoom);
+  };
+  const la0 = parseFloat(p.lat), lo0 = parseFloat(p.lng);
+  if (isFinite(la0) && isFinite(lo0)) { m.setView([la0, lo0], 15); poner(la0, lo0); }
+  else if (otros.length) m.fitBounds(otros.map(q => [q.lat, q.lng]), { padding: [30, 30], maxZoom: 14 });
+  else m.setView([-36.83, -73.05], 12);
+  m.on('click', ev => poner(ev.latlng.lat, ev.latlng.lng));
+  setTimeout(() => m.invalidateSize(), 250);
+
+  const buscar = async () => {
+    const q = $('#p-buscar').value.trim();
+    if (!q) return aviso('Escriba el nombre de un lugar.', 'error');
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=es&q=' + encodeURIComponent(q));
+      const j = await r.json();
+      if (!j.length) return aviso('No se encontró ese lugar. Pruebe con otro nombre o toque el mapa.', 'error');
+      poner(parseFloat(j[0].lat), parseFloat(j[0].lon), 16);
+    } catch (_) { aviso('No se pudo buscar. Revise su conexión o toque el mapa.', 'error'); }
+  };
+  $('#p-ir').onclick = buscar;
+  $('#p-buscar').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); buscar(); } });
   $('#btn-mi-pos').onclick = async () => {
     const pos = await obtenerPosicion();
     if (!pos) return aviso('No se pudo obtener la ubicación.', 'error');
-    f.lat.value = pos.lat.toFixed(6); f.lng.value = pos.lng.toFixed(6);
+    poner(pos.lat, pos.lng, 16);
   };
   f.onsubmit = async ev => {
     ev.preventDefault();
     const d = new FormData(f);
-    const lat = parseFloat(String(d.get('lat')).replace(',', '.')), lng = parseFloat(String(d.get('lng')).replace(',', '.'));
-    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return aviso('Las coordenadas no son válidas.', 'error');
+    const lat = parseFloat(d.get('lat')), lng = parseFloat(d.get('lng'));
+    if (!isFinite(lat) || !isFinite(lng)) return aviso('Toque el mapa para marcar el punto.', 'error');
     cargando(true, 'Guardando…');
     try {
       await api('guardarPunto', { punto: { id: id || '', nombre: d.get('nombre').trim(), descripcion: d.get('descripcion').trim(), lat, lng } });
@@ -206,23 +346,48 @@ function formPunto(id) {
   };
 }
 
-/* Evaluación asistida por IA */
-function renderIA() {
-  const P = S.panel, f = S.filtroIA;
-  const rs = P.respuestas.filter(r => {
-    const a = actPor(r.actividad_id);
-    return a && a.tipo !== 'alternativas' && (!f.act || r.actividad_id === f.act) && (!f.pend || r.estado !== 'evaluada');
-  });
+/* ---------- Respuestas (el docente ve todo; evalúa con IA o a mano) ---------- */
+function renderRespuestas() {
+  const P = S.panel, f = S.filtroR, est = estActivos();
+  const pills = [['', 'Todas']].concat(P.actividades.map((a, i) => [a.id, (i + 1) + '. ' + a.titulo]));
+  const lista = P.actividades.filter(a => !f.act || a.id === f.act);
   $('#doc-contenido').innerHTML = `
-    <div class="bg-white/95 rounded-2xl shadow p-4 flex flex-wrap gap-3 items-center">
-      <select id="filtro-act" class="border rounded-xl px-3 py-2 text-sm"><option value="">Todas las actividades</option>
-        ${P.actividades.filter(a => a.tipo !== 'alternativas').map(a => `<option value="${esc(a.id)}" ${f.act === a.id ? 'selected' : ''}>${esc(a.titulo)}</option>`).join('')}</select>
-      <label class="text-sm flex items-center gap-2"><input id="filtro-pend" type="checkbox" ${f.pend ? 'checked' : ''}> Solo por evaluar</label>
-      <button data-accion="ia-todas" class="ml-auto bg-slate-800 text-white text-sm font-semibold px-3 py-2 rounded-xl">🤖 Sugerir con IA a todas</button>
+    <div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">
+      <div class="flex gap-2 overflow-x-auto pb-1">${pills.map(([k, t]) =>
+        `<button data-accion="filtro-act" data-id="${esc(k)}" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-semibold ${f.act === k ? 'bg-indigo-700 text-white' : 'bg-slate-100'}">${esc(t)}</button>`).join('')}</div>
+      <div class="flex flex-wrap gap-3 items-center">
+        <select id="filtro-estado" class="border rounded-xl px-3 py-2 text-sm">
+          <option value="todas" ${f.estado === 'todas' ? 'selected' : ''}>Todas las respuestas</option>
+          <option value="pendientes" ${f.estado === 'pendientes' ? 'selected' : ''}>Por evaluar</option>
+          <option value="evaluadas" ${f.estado === 'evaluadas' ? 'selected' : ''}>Ya evaluadas</option>
+        </select>
+        <button data-accion="ia-todas" class="ml-auto bg-slate-800 text-white text-sm font-semibold px-3 py-2 rounded-xl">🤖 Sugerir con IA las pendientes</button>
+      </div>
     </div>
-    <div class="space-y-3 mt-3">${rs.map(tarjetaEval).join('') || '<p class="text-slate-500 text-center py-8">No hay respuestas para mostrar.</p>'}</div>`;
-  $('#filtro-act').onchange = e => { S.filtroIA.act = e.target.value; renderIA(); };
-  $('#filtro-pend').onchange = e => { S.filtroIA.pend = e.target.checked; renderIA(); };
+    <div class="space-y-5 mt-4">${lista.map(a => bloqueActividad(a, est)).join('') || '<p class="text-slate-500 text-center py-8">Aún no hay actividades.</p>'}</div>`;
+  $('#filtro-estado').onchange = e => { S.filtroR.estado = e.target.value; redibujar(); };
+}
+function bloqueActividad(a, est) {
+  const P = S.panel, f = S.filtroR, T = TIPOS[a.tipo] || TIPOS.desarrollo;
+  const todas = P.respuestas.filter(r => r.actividad_id === a.id);
+  const rs = todas.filter(r => f.estado === 'todas' || (f.estado === 'pendientes' ? r.estado !== 'evaluada' : r.estado === 'evaluada'))
+    .sort((x, y) => nombreDe(x.rut).localeCompare(nombreDe(y.rut), 'es'));
+  const resp = new Set(todas.map(r => rutKey(r.rut)));
+  const sin = est.filter(e => !resp.has(rutKey(e.rut)));
+  return `<section>
+    <div class="flex items-center gap-2 mb-2">
+      <span class="h-9 w-9 rounded-xl bg-${T.c}-100 flex items-center justify-center text-xl">${T.ic}</span>
+      <h3 class="font-bold flex-1">${esc(a.titulo)}</h3>
+      <span class="text-xs bg-white/90 rounded-full px-2 py-1 shadow">${todas.length}/${est.length} respondieron</span>
+    </div>
+    <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y pauta'}</summary>
+      <p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>
+      ${a.tipo === 'alternativas' ? `<p class="mt-2 text-emerald-700 font-semibold">✔ Correcta: ${esc(a.correcta)}</p>` : (a.pauta ? `<p class="mt-2"><b>Pauta:</b> ${esc(a.pauta)}</p>` : '')}
+    </details>
+    <div class="space-y-3">${rs.map(r => tarjetaResp(r, a)).join('') || '<div class="bg-white/80 rounded-2xl p-4 text-center text-slate-500 text-sm">No hay respuestas con este filtro.</div>'}</div>
+    ${sin.length ? `<details class="mt-2 text-sm bg-amber-50 rounded-xl p-3"><summary class="cursor-pointer font-semibold text-amber-800">Sin responder (${sin.length})</summary>
+      <ul class="mt-2 list-disc pl-5 text-slate-700">${sin.map(e => `<li>${esc(e.nombre)} <span class="text-xs text-slate-400">${esc(e.curso)}</span></li>`).join('')}</ul></details>` : ''}
+  </section>`;
 }
 function enlacesUbicacion(r) {
   const la = parseFloat(r.lat), lo = parseFloat(r.lng);
@@ -231,27 +396,33 @@ function enlacesUbicacion(r) {
     <a class="underline text-teal-700" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${la},${lo}">Google Maps</a> ·
     <a class="underline text-teal-700" target="_blank" rel="noopener" href="https://earth.google.com/web/search/${la},${lo}">Google Earth</a></p>`;
 }
-function tarjetaEval(r) {
-  const a = actPor(r.actividad_id);
-  const p0 = r.puntaje_final !== '' ? r.puntaje_final : r.puntaje_ia;
+function tarjetaResp(r, a) {
+  const alt = a.tipo === 'alternativas';
+  const ok = alt && String(r.respuesta).trim() === String(a.correcta).trim();
+  const p0 = r.puntaje_final !== '' && r.puntaje_final != null ? r.puntaje_final : (tieneIA(r) ? r.puntaje_ia : '');
   const c0 = r.retro_docente || r.comentario_ia || '';
   const inp = 'border rounded-xl px-3 py-2';
   return `<article id="ev-${esc(r.id)}" class="bg-white/95 rounded-2xl shadow p-4 space-y-2">
-    <div class="flex justify-between gap-2"><b>${esc(nombreDe(r.rut))}</b>${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Por evaluar', 'amber')}</div>
-    <p class="text-xs text-slate-500">${esc(a.titulo)} · máx. ${esc(a.puntaje_max)} pt</p>
-    <p class="text-sm bg-slate-50 rounded-xl p-3 whitespace-pre-line">${esc(r.respuesta) || '<i>(solo fotografía)</i>'}</p>
+    <div class="flex justify-between gap-2 items-start">
+      <div><b>${esc(nombreDe(r.rut))}</b><div class="text-xs text-slate-400">${fechaCorta(r.timestamp_cliente || r.timestamp_servidor)}</div></div>
+      ${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Por evaluar', 'amber')}
+    </div>
+    <div class="text-sm bg-slate-50 rounded-xl p-3">
+      <div class="text-xs font-semibold text-slate-500 mb-1">Respuesta del estudiante</div>
+      <p class="whitespace-pre-line">${esc(r.respuesta) || '<i>(solo fotografía)</i>'}</p>
+      ${alt ? `<div class="mt-2">${ok ? chip('Correcta', 'emerald') : chip('Incorrecta', 'rose')}</div>` : ''}
+    </div>
     ${r.foto_id ? `<button data-accion="ver-foto" data-id="${esc(r.foto_id)}" class="text-sm underline text-teal-700">📷 Ver fotografía</button>` : ''}
     ${enlacesUbicacion(r)}
-    ${a.pauta ? `<details class="text-sm"><summary class="cursor-pointer text-slate-500">Ver pauta</summary><p class="mt-1 whitespace-pre-line">${esc(a.pauta)}</p></details>` : ''}
     <div class="flex flex-wrap gap-2 items-start">
       <input data-campo="puntaje" type="number" step="0.5" min="0" max="${esc(a.puntaje_max)}" value="${esc(p0)}" placeholder="Pts" class="${inp} w-24">
       <textarea data-campo="retro" rows="2" placeholder="Comentario breve para el estudiante" class="${inp} flex-1 min-w-[12rem]">${esc(c0)}</textarea>
     </div>
-    <p data-campo="ia-nota" class="text-xs text-indigo-600 ${r.puntaje_ia !== '' ? '' : 'hidden'}">Sugerencia de la IA: ${esc(r.puntaje_ia)} pt. Revise antes de aprobar.</p>
+    ${tieneIA(r) ? `<p class="text-xs text-indigo-600">🤖 Sugerencia de la IA: ${esc(r.puntaje_ia)} de ${esc(a.puntaje_max)} pt. Revísela antes de aprobar.</p>` : ''}
     <div class="flex flex-wrap gap-2">
-      <button data-accion="ia-uno" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-semibold">🤖 Sugerir con IA</button>
-      <button data-accion="aprobar-ia" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold">✔ Aprobar sugerencia</button>
-      <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button>
+      ${alt ? '' : `<button data-accion="ia-uno" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🤖 Sugerir con IA</button>`}
+      ${!alt && tieneIA(r) ? `<button data-accion="aprobar-ia" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">✔ Aprobar sugerencia</button>` : ''}
+      <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button>
     </div></article>`;
 }
 async function iaUna(id, silencioso) {
@@ -260,14 +431,14 @@ async function iaUna(id, silencioso) {
   try {
     const d = await api('evaluarIA', { respuesta_id: id });
     r.puntaje_ia = d.puntaje; r.comentario_ia = d.comentario;
-    if (!silencioso) renderIA();
+    if (!silencioso) redibujar();
   } finally { if (!silencioso) cargando(false); }
 }
 async function guardarEval(id, usarIA) {
   const r = S.panel.respuestas.find(x => x.id === id);
   let puntaje, retro;
   if (usarIA) {
-    if (r.puntaje_ia === '' || r.puntaje_ia == null) return aviso('Primero pida la sugerencia de la IA.', 'error');
+    if (!tieneIA(r)) return aviso('Primero pida la sugerencia de la IA.', 'error');
     puntaje = r.puntaje_ia; retro = r.comentario_ia;
   } else {
     const card = $('#ev-' + id);
@@ -279,22 +450,25 @@ async function guardarEval(id, usarIA) {
   try {
     const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(puntaje), retro });
     r.puntaje_final = d.puntaje_final; r.retro_docente = retro; r.estado = 'evaluada';
-    renderIA(); aviso('Evaluación guardada.');
+    redibujar(); aviso('Evaluación guardada.');
   } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
 }
 async function iaTodas() {
-  const f = S.filtroIA;
-  const rs = S.panel.respuestas.filter(r => { const a = actPor(r.actividad_id); return a && a.tipo !== 'alternativas' && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && (r.puntaje_ia === '' || r.puntaje_ia == null); });
-  if (!rs.length) return aviso('No hay respuestas sin sugerencia.');
+  const f = S.filtroR;
+  const rs = S.panel.respuestas.filter(r => {
+    const a = actPor(r.actividad_id);
+    return a && a.tipo !== 'alternativas' && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
+  });
+  if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
   let n = 0;
   for (const r of rs) {
     cargando(true, `Consultando a la IA (${++n}/${rs.length})…`);
     try { await iaUna(r.id, true); } catch (e) { aviso(e.message, 'error'); break; }
   }
-  cargando(false); renderIA();
+  cargando(false); redibujar();
 }
 
-/* Ubicaciones */
+/* ---------- Ubicaciones ---------- */
 function renderUbicaciones() {
   const rs = S.panel.respuestas.slice().sort((a, b) => String(a.timestamp_cliente).localeCompare(String(b.timestamp_cliente)));
   $('#doc-contenido').innerHTML = `
@@ -309,7 +483,7 @@ function renderUbicaciones() {
       </tbody></table></div>`;
 }
 
-/* Reportes */
+/* ---------- Reportes ---------- */
 function renderReportes() {
   const est = calcularEstudiantes();
   $('#doc-contenido').innerHTML = `
@@ -426,7 +600,7 @@ function exportarCSV() {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-/* Ajustes */
+/* ---------- Ajustes ---------- */
 function renderAjustes() {
   $('#doc-contenido').innerHTML = `
     <div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">
@@ -450,4 +624,80 @@ function renderAjustes() {
       <textarea id="inp-est" rows="8" class="w-full border rounded-xl p-3 text-sm" placeholder="12.345.678-5;Ana Pérez Soto;3° Medio A"></textarea>
       <button data-accion="importar-est" class="bg-slate-800 text-white font-semibold px-4 py-2 rounded-xl">2. Importar estudiantes</button>
     </div>`;
+}
+
+/* ---------- Acciones del panel docente (las llama app.js) ---------- */
+async function accionDocente(a, b, id) {
+  switch (a) {
+    case 'tab-doc': S.tabDoc = b.dataset.tab; return renderDocente();
+    case 'nueva-act': return formActividad();
+    case 'editar-act': return formActividad(id);
+    case 'borrar-act':
+      if (!confirm('¿Eliminar esta actividad? Las respuestas ya enviadas se conservan en la planilla.')) return;
+      cargando(true); await api('eliminarActividad', { id }); await cargarPanel(); return renderDocente();
+    case 'ver-resp': S.filtroR.act = id; S.tabDoc = 'respuestas'; renderDocente(); window.scrollTo(0, 0); return;
+    case 'nuevo-punto': return formPunto();
+    case 'editar-punto': return formPunto(id);
+    case 'borrar-punto':
+      if (!confirm('¿Eliminar este punto?')) return;
+      cargando(true); await api('eliminarPunto', { id }); await cargarPanel(); return renderDocente();
+    case 'filtro-act': S.filtroR.act = id || ''; return redibujar();
+    case 'ia-uno': return iaUna(id, false);
+    case 'aprobar-ia': return guardarEval(id, true);
+    case 'guardar-eval': return guardarEval(id, false);
+    case 'ia-todas': return iaTodas();
+    case 'ver-foto': {
+      cargando(true, 'Cargando fotografía…');
+      const u = await dataUrlArchivo(id); cargando(false);
+      return modal(`<div class="pt-4"><img src="${u}" class="w-full rounded-xl" alt="Fotografía"></div>`);
+    }
+    case 'rep-ind': return reporteIndividual($('#sel-est').value);
+    case 'rep-gen': return reporteGeneral();
+    case 'rep-csv': return exportarCSV();
+    case 'subir-insignia': {
+      const f = $('#inp-insignia').files[0];
+      if (!f) return aviso('Elija una imagen.', 'error');
+      cargando(true, 'Subiendo…');
+      await api('subirInsignia', { imagenB64: await redimensionarPNG(f) });
+      await cargarInsignia(); renderAjustes(); cargando(false); aviso('Insignia actualizada.'); return;
+    }
+    case 'plantilla-xlsx': {
+      if (typeof XLSX === 'undefined') return aviso('No se pudo cargar el lector de Excel. Revise su conexión y recargue.', 'error');
+      const ws = XLSX.utils.aoa_to_sheet([['RUT', 'NOMBRE COMPLETO', 'CURSO'], ['12.345.678-5', 'Ana Pérez Soto', '3° Medio A']]);
+      ws['!cols'] = [{ wch: 16 }, { wch: 38 }, { wch: 16 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Nómina');
+      XLSX.writeFile(wb, 'nomina_estudiantes.xlsx');
+      return;
+    }
+    case 'leer-xlsx': {
+      const f = $('#inp-xlsx').files[0];
+      if (!f) return aviso('Elija primero el archivo de Excel.', 'error');
+      if (typeof XLSX === 'undefined') return aviso('No se pudo cargar el lector de Excel. Revise su conexión y recargue.', 'error');
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+      const ok = [], mal = [];
+      filas.forEach((r, i) => {
+        const r0 = String(r[0] || '').trim(), nom = String(r[1] || '').trim(), cur = String(r[2] || '').trim();
+        if (!r0 && !nom && !cur) return;
+        if (i === 0 && /rut/i.test(r0)) return;
+        const rut = normalizarRut(r0);
+        if (!rut || !nom || !cur) mal.push('Fila ' + (i + 1) + ': ' + (nom || r0 || '(vacía)'));
+        else ok.push(rut + ';' + nom + ';' + cur);
+      });
+      $('#inp-est').value = ok.join('\n');
+      $('#xlsx-avisos').innerHTML =
+        `<p class="text-emerald-700 font-semibold">✔ ${ok.length} estudiante(s) listo(s) para importar.</p>` +
+        (mal.length ? `<p class="text-rose-700 font-semibold mt-1">⚠ ${mal.length} fila(s) con RUT inválido o datos incompletos (no se incluyeron):</p><ul class="list-disc pl-5 text-rose-700">${mal.map(m => `<li>${esc(m)}</li>`).join('')}</ul>` : '');
+      return;
+    }
+    case 'importar-est': {
+      const filas = $('#inp-est').value.split('\n').map(l => l.split(/[;\t]/).map(s => s.trim())).filter(c => c.length >= 3 && c[0])
+        .map(c => ({ rut: c[0], nombre: c[1], curso: c[2] }));
+      if (!filas.length) return aviso('No se encontraron líneas válidas.', 'error');
+      cargando(true, 'Importando…');
+      const d = await api('importarEstudiantes', { filas });
+      await cargarPanel(); renderDocente(); aviso(d.agregados + ' estudiante(s) agregado(s).'); return;
+    }
+  }
 }
