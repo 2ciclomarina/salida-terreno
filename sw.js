@@ -1,12 +1,13 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v1';
+const VERSION = 'terreno-v2';
 const TILES = VERSION + '-tiles';
-const SHELL = ['./', './index.html', './app.js', './manifest.json'];
+const SHELL = ['./', './index.html', './docente.html', './app.js', './manifest.json'];
 const CDN = [
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 ];
 const MAX_TILES = 600;
 
@@ -63,7 +64,7 @@ self.addEventListener('fetch', e => {
     return e.respondWith(tiles(req));
   }
   if (req.mode === 'navigate') {
-    return e.respondWith(fetch(req).catch(() => caches.match('./index.html')));
+    return e.respondWith(fetch(req).catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));
   }
   e.respondWith(swr(req));
 });
