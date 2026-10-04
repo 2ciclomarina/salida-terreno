@@ -1,5 +1,5 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v4';
+const VERSION = 'terreno-v5';
 const TILES = VERSION + '-tiles';
 const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json'];
 const CDN = [
