@@ -1,7 +1,8 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v5';
+const VERSION = 'terreno-v7';
 const TILES = VERSION + '-tiles';
-const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json'];
+const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json',
+  './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png', './favicon.png'];
 const CDN = [
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
