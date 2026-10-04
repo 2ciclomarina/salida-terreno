@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Terreno">
   <title>Salida a Terreno</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230f766e'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%A7%AD%3C/text%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -61,8 +65,8 @@
     <section id="pantalla-login" class="hidden max-w-md mx-auto">
       <div class="bg-white/90 backdrop-blur rounded-3xl shadow-xl p-6 space-y-5">
         <div class="text-center">
-          <div class="mx-auto h-20 w-20 rounded-full bg-gradient-to-br from-teal-500 to-sky-500 flex items-center justify-center text-4xl shadow-lg">🧭</div>
-          <h2 class="text-2xl font-extrabold mt-3">Bienvenido(a)</h2>
+          <img src="icon-192.png" alt="Colegio Marina de Chile – Salida a Terreno" class="mx-auto h-32 w-32 object-contain">
+          <h2 class="text-2xl font-extrabold mt-2">Bienvenido(a)</h2>
           <p class="text-slate-500 text-sm">Ingrese su RUT para comenzar su salida a terreno.</p>
         </div>
         <form id="form-estudiante" class="space-y-3">
