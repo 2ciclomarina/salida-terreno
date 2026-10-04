@@ -1,7 +1,7 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v2';
+const VERSION = 'terreno-v3';
 const TILES = VERSION + '-tiles';
-const SHELL = ['./', './index.html', './docente.html', './app.js', './manifest.json'];
+const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json'];
 const CDN = [
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
@@ -14,7 +14,7 @@ const MAX_TILES = 600;
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const c = await caches.open(VERSION);
-    await c.addAll(SHELL);
+    await Promise.all(SHELL.map(u => fetch(u, { cache: 'reload' }).then(r => { if (r.ok) return c.put(u, r); }).catch(() => {})));
     await Promise.all(CDN.map(u => fetch(u, { mode: 'no-cors' }).then(r => c.put(u, r)).catch(() => {})));
     await self.skipWaiting();
   })());
@@ -44,14 +44,29 @@ async function tiles(req) {
   } catch (_) { return new Response('', { status: 504 }); }
 }
 
-async function swr(req) {
+// Archivos propios: primero internet (siempre la versión nueva); sin internet, la copia guardada
+async function redPrimero(req) {
+  const c = await caches.open(VERSION);
+  try {
+    const r = await fetch(req, { cache: 'no-cache' });
+    if (r && r.ok) c.put(req, r.clone());
+    return r;
+  } catch (_) {
+    const hit = await c.match(req, { ignoreSearch: true });
+    return hit || (req.mode === 'navigate' ? c.match('./index.html') : new Response('', { status: 504 }));
+  }
+}
+
+// Librerías externas: primero la copia guardada
+async function copiaPrimero(req) {
   const c = await caches.open(VERSION);
   const hit = await c.match(req);
-  const red = fetch(req).then(r => {
+  if (hit) return hit;
+  try {
+    const r = await fetch(req);
     if (r && (r.ok || r.type === 'opaque')) c.put(req, r.clone());
     return r;
-  }).catch(() => hit);
-  return hit || red;
+  } catch (_) { return new Response('', { status: 504 }); }
 }
 
 self.addEventListener('fetch', e => {
@@ -63,10 +78,8 @@ self.addEventListener('fetch', e => {
   if (/tile\.opentopomap\.org|tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname)) {
     return e.respondWith(tiles(req));
   }
-  if (req.mode === 'navigate') {
-    return e.respondWith(fetch(req).catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));
-  }
-  e.respondWith(swr(req));
+  if (u.origin === self.location.origin) return e.respondWith(redPrimero(req));
+  e.respondWith(copiaPrimero(req));
 });
 
 // Cuando vuelve la señal, avisa a la app abierta para que envíe la cola
