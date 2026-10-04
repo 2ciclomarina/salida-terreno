@@ -16,6 +16,7 @@ const TIPOS = {
   foto: { ic: '📷', nom: 'Fotografía', c: 'amber' },
   grupo: { ic: '🧩', nom: 'Ejercicio con partes', c: 'indigo' }
 };
+const NIVELES = { L: ['Logrado', 'emerald'], M: ['Medianamente logrado', 'amber'], N: ['No observado', 'rose'] };
 
 const S = {
   rol: null, token: null, usuario: null, datos: null, offset: 0, pend: [],
@@ -84,7 +85,7 @@ function aviso(msg, tipo = 'ok') {
   a.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-[92vw] px-4 py-3 rounded-xl text-white text-sm shadow-lg ' +
     (tipo === 'error' ? 'bg-rose-600' : 'bg-slate-800');
   clearTimeout(aviso._t);
-  aviso._t = setTimeout(() => a.classList.add('hidden'), 4500);
+  aviso._t = setTimeout(() => a.classList.add('hidden'), 6000);
 }
 function cargando(on, msg = 'Cargando…') {
   $('#cargando-msg').textContent = msg;
@@ -384,6 +385,18 @@ async function cargarInicio() {
   await refrescarPend();
   await actualizarContador();
 }
+// Vuelve a pedir los datos al servidor (por ejemplo, para ver una evaluación nueva)
+async function refrescarDatos(silencioso) {
+  if (!S.usuario || S.rol !== 'estudiante') return;
+  if (!navigator.onLine) { if (!silencioso) aviso('Sin conexión.', 'error'); return; }
+  if (!silencioso) cargando(true, 'Actualizando…');
+  try {
+    await cargarInicio();
+    renderEstudiante();
+    if (!silencioso) aviso('Información actualizada.');
+  } catch (e) { if (!silencioso) aviso(e.message, 'error'); }
+  finally { if (!silencioso) cargando(false); }
+}
 const ahoraSrv = () => Date.now() + (S.offset || 0);
 function estadoVentana(a) {
   const t = ahoraSrv();
@@ -445,9 +458,12 @@ function renderEstudiante() {
   const hechas = acts.filter(a => respuestaDe(a)).length, tot = acts.length;
   const pct = tot ? Math.round(hechas / tot * 100) : 0;
   $('#est-info').innerHTML = `<div class="rounded-3xl bg-gradient-to-br from-teal-600 to-sky-600 text-white p-5 shadow-lg">
-    <div class="text-sm opacity-90">Hola 👋</div>
-    <div class="text-xl font-extrabold leading-tight">${esc(e.nombre)}</div>
-    <div class="text-xs opacity-90">RUT ${esc(e.rut)} · ${esc(e.curso)}</div>
+    <div class="flex items-start justify-between gap-2">
+      <div><div class="text-sm opacity-90">Hola 👋</div>
+        <div class="text-xl font-extrabold leading-tight">${esc(e.nombre)}</div>
+        <div class="text-xs opacity-90">RUT ${esc(e.rut)} · ${esc(e.curso)}</div></div>
+      <button data-accion="actualizar" class="shrink-0 text-xs bg-white/20 hover:bg-white/30 rounded-full px-3 py-1.5 font-semibold">🔄 Actualizar</button>
+    </div>
     <div class="mt-4">
       <div class="flex justify-between text-xs mb-1"><span>Su avance</span><span><b>${hechas}</b> de ${tot} actividades</span></div>
       <div class="h-3 bg-white/25 rounded-full overflow-hidden"><div class="h-3 bg-white rounded-full transition-all" style="width:${pct}%"></div></div>
@@ -503,6 +519,45 @@ function bloqueRespuesta(a, r) {
   return `<div class="mt-3 rounded-2xl bg-slate-50 border border-slate-200 p-3 text-sm">
     <div class="text-xs font-semibold text-slate-500 mb-1">Su respuesta${loc ? ' (guardada en su teléfono, aún sin enviar)' : ''}</div>${cuerpo}</div>`;
 }
+
+/* Rúbrica: criterios y niveles */
+function filasRubrica(rubrica, niveles) {
+  return (rubrica || []).map((c, i) => {
+    const k = (niveles || [])[i] || 'N', n = NIVELES[k] || NIVELES.N;
+    const d = k === 'L' ? c.logrado : k === 'M' ? c.medio : c.no;
+    return `<div class="rounded-xl bg-white border p-2 mt-1"><div class="flex items-center justify-between gap-2">
+      <span class="text-sm font-semibold">${esc(c.criterio)}</span>${chip(n[0], n[1])}</div>
+      ${d ? `<div class="text-xs text-slate-500 mt-1">${esc(d)}</div>` : ''}</div>`;
+  }).join('');
+}
+function verRubrica(rubrica) {
+  if (!rubrica || !rubrica.length) return '';
+  return `<details class="text-xs bg-slate-50 rounded-xl p-2"><summary class="cursor-pointer font-semibold text-slate-600">📋 ¿Cómo se evaluará?</summary>
+    <div class="mt-2 space-y-2">${rubrica.map(c => `<div><div class="font-semibold">${esc(c.criterio)}</div>
+      <div>✅ Logrado: ${esc(c.logrado || '—')}</div><div>🟡 Medianamente logrado: ${esc(c.medio || '—')}</div><div>⚪ No observado: ${esc(c.no || '—')}</div></div>`).join('')}</div></details>`;
+}
+// Lo que ve el estudiante después de que su profesor revisó la actividad
+function bloqueEvaluacion(a, r) {
+  const ev = jsonSeguro(r.evaluacion, {});
+  let det = '';
+  if (a.tipo === 'alternativas') {
+    const ok = Number(r.puntaje_final) > 0;
+    det = `<div class="mt-1">${ok ? '✔ <b>Correcta</b>' : '✖ <b>Incorrecta</b>'}</div>` +
+      (!ok && a.correcta ? `<div class="text-xs text-slate-600">La alternativa correcta era: <b>${esc(a.correcta)}</b></div>` : '');
+  } else if (a.tipo === 'grupo') {
+    det = (a.partes || []).map((p, i) => {
+      let t = '';
+      if (p.tipo === 'alternativas') {
+        if (ev.alt) t = ev.alt[p.id] ? '✔ <b>Correcta</b>' : '✖ <b>Incorrecta</b>' + (p.correcta ? ` <span class="text-xs text-slate-600">(la correcta era: ${esc(p.correcta)})</span>` : '');
+      } else if ((p.rubrica || []).length && ev[p.id]) t = filasRubrica(p.rubrica, ev[p.id]);
+      return t ? `<div class="mt-2"><div class="text-xs font-semibold text-slate-500">Parte ${i + 1}</div>${t}</div>` : '';
+    }).join('');
+  } else if ((a.rubrica || []).length && ev.main) det = filasRubrica(a.rubrica, ev.main);
+  return `<div class="mt-3 text-sm bg-emerald-50 border border-emerald-200 rounded-2xl p-3">
+    <div class="font-bold">Su evaluación: ${esc(r.puntaje_final)} de ${esc(a.puntaje_max)} pt</div>${det}
+    ${r.retro_docente ? `<div class="mt-2 text-slate-700">💬 ${esc(r.retro_docente)}</div>` : ''}</div>`;
+}
+
 function tarjetaActividad(a) {
   const v = estadoVentana(a), r = respuestaDe(a), T = TIPOS[a.tipo] || TIPOS.desarrollo;
   const pt = (S.datos.puntos || []).find(p => p.id === a.punto_id);
@@ -522,14 +577,8 @@ function tarjetaActividad(a) {
       : `<button disabled class="mt-3 w-full bg-slate-200 text-slate-500 font-semibold py-3 rounded-2xl">${v === 'pronto' ? 'Todavía no disponible' : 'El plazo terminó'}</button>`;
   }
   let res = '';
-  if (r && r.estado === 'evaluada') {
-    const ok = Number(r.puntaje_final) > 0;
-    res = `<div class="mt-3 text-sm bg-emerald-50 border border-emerald-200 rounded-2xl p-3">
-      ${a.tipo === 'alternativas' ? (ok ? '✔ <b>Correcta</b> · ' : '✖ <b>Incorrecta</b> · ') : ''}Puntaje: <b>${esc(r.puntaje_final)}</b> de ${esc(a.puntaje_max)}
-      ${r.retro_docente ? `<div class="mt-1 text-slate-700">💬 ${esc(r.retro_docente)}</div>` : ''}</div>`;
-  } else if (r && r.origen !== 'local') {
-    res = '<div class="mt-2 text-xs text-slate-500">Su profesor revisará su respuesta.</div>';
-  }
+  if (r && r.estado === 'evaluada') res = bloqueEvaluacion(a, r);
+  else if (r && r.origen !== 'local') res = '<div class="mt-2 text-xs text-slate-500">Su profesor revisará su respuesta. Cuando termine, pinche «🔄 Actualizar» para ver su evaluación.</div>';
   const nPartes = a.tipo === 'grupo' ? ` · ${(a.partes || []).length} partes` : '';
   return `<article class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
     <div class="w-2 bg-${T.c}-500"></div>
@@ -559,9 +608,9 @@ function camposGrupo(a) {
         <span class="h-8 w-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold text-sm">${String.fromCharCode(65 + j)}</span>
         <span class="text-sm">${esc(o)}</span></div></label>`).join('');
     } else if (p.tipo === 'desarrollo') {
-      cuerpo = `<textarea id="t_${esc(p.id)}" rows="5" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
+      cuerpo = verRubrica(p.rubrica) + `<textarea id="t_${esc(p.id)}" rows="5" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
     } else {
-      cuerpo = `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-4 cursor-pointer text-center">
+      cuerpo = verRubrica(p.rubrica) + `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-4 cursor-pointer text-center">
           <span class="text-3xl">📷</span><span class="font-semibold text-sm">Tomar o elegir fotografía</span>
           <input id="f_${esc(p.id)}" type="file" accept="image/*" capture="environment" class="hidden"></label>
         <img id="pv_${esc(p.id)}" class="hidden rounded-2xl max-h-48 mx-auto" alt="Vista previa">
@@ -586,9 +635,9 @@ async function abrirResponder(id) {
       <span class="h-9 w-9 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold">${String.fromCharCode(65 + i)}</span>
       <span class="text-sm">${esc(o)}</span></div></label>`).join('');
   } else if (a.tipo === 'desarrollo') {
-    campos = `<textarea id="r-texto" rows="7" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
+    campos = verRubrica(a.rubrica) + `<textarea id="r-texto" rows="7" class="w-full border-2 border-slate-200 rounded-2xl p-3 focus:outline-none focus:border-teal-600" placeholder="Escriba aquí su respuesta"></textarea>`;
   } else if (a.tipo === 'foto') {
-    campos = `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-5 cursor-pointer text-center">
+    campos = verRubrica(a.rubrica) + `<label class="flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 p-5 cursor-pointer text-center">
         <span class="text-4xl">📷</span><span class="font-semibold text-sm">Tomar o elegir fotografía</span>
         <input id="r-foto" type="file" accept="image/*" capture="environment" class="hidden"></label>
       <img id="r-prev" class="hidden rounded-2xl max-h-60 mx-auto" alt="Vista previa">
@@ -719,6 +768,7 @@ document.addEventListener('click', async e => {
       case 'ver-punto': S.tab = 'mapa'; S.foco = b.dataset.punto; window.scrollTo(0, 0); return renderContenidoEst();
       case 'responder': return await abrirResponder(id);
       case 'enviar-resp': return await enviarRespuestaUI(id);
+      case 'actualizar': return await refrescarDatos(false);
       case 'centrar':
         if (S.pos && S.mapa) S.mapa.setView(S.pos, 17); else aviso('Aún no tenemos su ubicación.', 'error');
         return;
@@ -775,6 +825,10 @@ async function iniciar() {
   setInterval(() => {
     if (S.rol === 'estudiante' && S.datos && !$('#pantalla-estudiante').classList.contains('hidden') && S.tab !== 'mapa' && $('#modal').classList.contains('hidden')) renderContenidoEst();
   }, 30000);
+  // Al volver a abrir la aplicación, trae la información nueva (por ejemplo, una evaluación)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && S.rol === 'estudiante' && S.datos && $('#modal').classList.contains('hidden') && S.tab !== 'mapa') refrescarDatos(true);
+  });
 
   let s = null;
   try { s = JSON.parse(localStorage.getItem(CLAVE_SESION) || 'null'); } catch (_) {}
