@@ -1,5 +1,5 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v3';
+const VERSION = 'terreno-v4';
 const TILES = VERSION + '-tiles';
 const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json'];
 const CDN = [
@@ -73,8 +73,9 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const u = new URL(req.url);
-  // La API de Apps Script nunca se cachea
+  // Ni la API de Apps Script ni el buscador de lugares se guardan en caché
   if (/(^|\.)script\.google(usercontent)?\.com$/.test(u.hostname)) return;
+  if (/nominatim\.openstreetmap\.org/.test(u.hostname)) return;
   if (/tile\.opentopomap\.org|tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname)) {
     return e.respondWith(tiles(req));
   }
