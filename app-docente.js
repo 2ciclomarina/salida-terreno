@@ -144,7 +144,7 @@ function renderActividades() {
         </div>
         <div class="mt-2 text-xs text-slate-600 space-y-0.5">
           <div>🕒 ${fechaCorta(a.fecha_inicio)} → ${fechaCorta(a.fecha_fin)}</div>
-          ${pt ? `<div>📍 ${esc(pt.nombre)}</div>` : ''}
+          <div>${pt ? '📍 Lugar: <b>' + esc(pt.nombre) + '</b>' : '📌 Actividad general (sin lugar)'}</div>
           ${nRub ? `<div>📋 Rúbrica con ${nRub} criterio(s)</div>` : ''}
           <div>${a.requiere_gps === 'no' ? '🚫 Sin GPS' : '📡 Registra ubicación'}</div>
         </div>
@@ -244,10 +244,11 @@ function formActividad(id) {
     ${sec(4, 'Puntaje y lugar')}
     <div class="grid grid-cols-2 gap-3">
       <label id="bloque-puntaje" class="block text-sm">Puntaje máximo<input name="puntaje_max" type="number" step="0.5" min="0.5" value="${esc(a.puntaje_max)}" class="${inp} mt-1"></label>
-      <label class="block text-sm">📍 Punto de visita
-        <select name="punto_id" class="${inp} mt-1"><option value="">(ninguno)</option>
+      <label class="block text-sm">📍 Lugar del terreno
+        <select name="punto_id" class="${inp} mt-1"><option value="">(ninguno: actividad general)</option>
         ${S.panel.puntos.map(p => `<option value="${esc(p.id)}" ${a.punto_id === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
     </div>
+    <p class="text-xs text-slate-600 bg-indigo-50 rounded-xl p-2">📍 <b>Lugar del terreno:</b> indica dónde se realiza esta actividad. Los estudiantes la verán agrupada bajo ese lugar, con un botón para verlo en el mapa y otro para saber cómo llegar. Elija «(ninguno)» si la pregunta no depende de un lugar.${S.panel.puntos.length ? '' : ' <b>Aún no hay lugares creados:</b> créelos primero en la pestaña «📍 Puntos».'}</p>
 
     ${sec(5, 'Horario')}
     <div class="flex flex-wrap gap-2">
@@ -602,6 +603,7 @@ function renderRespuestas() {
 }
 function bloqueActividad(a, est) {
   const P = S.panel, f = S.filtroR, T = TIPOS[a.tipo] || TIPOS.desarrollo;
+  const pt = P.puntos.find(p => p.id === a.punto_id);
   const todas = P.respuestas.filter(r => r.actividad_id === a.id);
   const rs = todas.filter(r => f.estado === 'todas' || (f.estado === 'pendientes' ? r.estado !== 'evaluada' : r.estado === 'evaluada'))
     .sort((x, y) => nombreDe(x.rut).localeCompare(nombreDe(y.rut), 'es'));
@@ -620,7 +622,8 @@ function bloqueActividad(a, est) {
   return `<section>
     <div class="flex items-center gap-2 mb-2">
       <span class="h-9 w-9 rounded-xl bg-${T.c}-100 flex items-center justify-center text-xl">${T.ic}</span>
-      <h3 class="font-bold flex-1">${esc(a.titulo)}</h3>
+      <div class="flex-1 min-w-0"><h3 class="font-bold">${esc(a.titulo)}</h3>
+        <div class="text-xs text-slate-500">${pt ? '📍 ' + esc(pt.nombre) : '📌 Actividad general'}</div></div>
       <span class="text-xs bg-white/90 rounded-full px-2 py-1 shadow">${todas.length}/${est.length} respondieron</span>
     </div>
     <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y rúbrica'}</summary>${detalle}</details>
