@@ -31,6 +31,7 @@ const actPor = id => S.panel.actividades.find(a => a.id === id);
 const nombreDe = rut => { const e = S.panel.estudiantes.find(x => rutKey(x.rut) === rutKey(rut)); return e ? e.nombre : rut; };
 const estActivos = () => S.panel.estudiantes.filter(e => String(e.activo).toLowerCase() !== 'no');
 const tieneIA = r => r.puntaje_ia !== '' && r.puntaje_ia != null;
+const hayParteManual = a => a.tipo !== 'alternativas' && (a.tipo !== 'grupo' || (a.partes || []).some(p => p.tipo !== 'alternativas'));
 
 function calcularEstudiantes() {
   const P = S.panel;
@@ -89,13 +90,14 @@ function renderActividades() {
     const n = P.respuestas.filter(r => r.actividad_id === a.id).length;
     const pt = P.puntos.find(p => p.id === a.punto_id);
     const pct = nEst ? Math.round(n / nEst * 100) : 0;
+    const nPartes = a.tipo === 'grupo' ? ` · ${(a.partes || []).length} partes` : '';
     return `<div class="bg-white/95 rounded-3xl shadow overflow-hidden flex">
       <div class="w-2 bg-${T.c}-500"></div>
       <div class="p-4 flex-1 min-w-0">
         <div class="flex items-start gap-3">
           <div class="h-11 w-11 shrink-0 rounded-2xl bg-${T.c}-100 flex items-center justify-center text-2xl">${T.ic}</div>
           <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${i + 1}. ${esc(a.titulo)}</div>
-            <div class="text-xs text-slate-500">${T.nom} · ${esc(a.puntaje_max)} pt</div></div>
+            <div class="text-xs text-slate-500">${T.nom}${nPartes} · ${esc(a.puntaje_max)} pt</div></div>
           ${estadoActividad(a)}
         </div>
         <div class="mt-2 text-xs text-slate-600 space-y-0.5">
@@ -118,25 +120,41 @@ function renderActividades() {
     <div class="space-y-3">${tarjetas || '<div class="bg-white/90 rounded-2xl p-8 text-center text-slate-500">Aún no hay actividades. Pinche «Nueva actividad» para crear la primera.</div>'}</div>`;
 }
 
+function parteNueva(t) {
+  t = t || 'alternativas';
+  return { tipo: t, enunciado: '', opciones: t === 'alternativas' ? ['', '', '', ''] : [], corrIdx: 0, pauta: '', puntaje: 1 };
+}
+
 function formActividad(id) {
   const ahora = new Date(), fin = new Date(Date.now() + 2 * 3600e3);
-  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: [], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
+  const a = id ? actPor(id) : { tipo: 'alternativas', opciones: [], partes: [], puntaje_max: 1, fecha_inicio: ahora.toISOString(), fecha_fin: fin.toISOString() };
   let ops = (a.opciones && a.opciones.length) ? a.opciones.slice() : ['', '', '', ''];
   let corr = a.correcta ? Math.max(0, ops.indexOf(a.correcta)) : 0;
+  let partes = (a.tipo === 'grupo' && a.partes && a.partes.length)
+    ? a.partes.map(p => ({
+      tipo: p.tipo, enunciado: p.enunciado || '',
+      opciones: (p.opciones && p.opciones.length) ? p.opciones.slice() : (p.tipo === 'alternativas' ? ['', '', '', ''] : []),
+      corrIdx: p.correcta ? Math.max(0, (p.opciones || []).indexOf(p.correcta)) : 0,
+      pauta: p.pauta || '', puntaje: p.puntaje || 1
+    }))
+    : [parteNueva('alternativas')];
   const inp = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
   const sec = (n, t) => `<div class="flex items-center gap-2 pt-2"><span class="h-6 w-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">${n}</span><span class="font-bold text-sm">${t}</span></div>`;
-  const tiles = [['alternativas', '✅', 'Alternativas', 'Una respuesta correcta'], ['desarrollo', '✍️', 'Desarrollo', 'Respuesta escrita'], ['foto', '📷', 'Fotografía', 'El alumno sube una foto']]
+  const tiles = [['alternativas', '✅', 'Alternativas', 'Una respuesta correcta'], ['desarrollo', '✍️', 'Desarrollo', 'Respuesta escrita'], ['foto', '📷', 'Fotografía', 'El alumno sube una foto'], ['grupo', '🧩', 'Ejercicio con partes', 'Mezcla alternativas, desarrollo y foto']]
     .map(([v, ic, t, d]) => `<label class="cursor-pointer"><input type="radio" name="tipo" value="${v}" class="peer sr-only" ${a.tipo === v ? 'checked' : ''}>
       <div class="rounded-2xl border-2 border-slate-200 p-3 text-center peer-checked:border-indigo-600 peer-checked:bg-indigo-50 transition h-full">
       <div class="text-3xl">${ic}</div><div class="font-bold text-sm">${t}</div><div class="text-[11px] text-slate-500">${d}</div></div></label>`).join('');
+  const optTipo = t => ['alternativas', 'desarrollo', 'foto'].map(v => `<option value="${v}" ${t === v ? 'selected' : ''}>${TIPOS[v].ic} ${TIPOS[v].nom}</option>`).join('');
+
   modal(`<form id="f-act" class="space-y-3 pt-2">
     <h3 class="text-lg font-extrabold pr-6">${id ? 'Editar' : 'Nueva'} actividad</h3>
     ${sec(1, 'Tipo de pregunta')}
-    <div class="grid grid-cols-3 gap-2">${tiles}</div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${tiles}</div>
 
     ${sec(2, 'Pregunta')}
     <input name="titulo" required class="${inp}" placeholder="Título corto (ej: Observe el río)" value="${esc(a.titulo || '')}">
     <textarea name="enunciado" rows="4" required class="${inp}" placeholder="Escriba aquí la pregunta o la instrucción para los estudiantes">${esc(a.enunciado || '')}</textarea>
+    <p id="nota-enun" class="hidden text-xs text-slate-500 -mt-2">En un ejercicio con partes, este texto es opcional: úselo para el contexto general (por ejemplo, «Observe la imagen y responda»).</p>
     <label class="block text-sm">🖼️ Imagen de apoyo (opcional)<input name="imagen" type="file" accept="image/*" class="${inp} mt-1"></label>
 
     <div id="bloque-alt" class="space-y-2">
@@ -149,10 +167,21 @@ function formActividad(id) {
       ${sec(3, 'Pauta de corrección')}
       <textarea name="pauta" rows="3" class="${inp} mt-2" placeholder="¿Qué debe incluir una buena respuesta? La IA usa esto para sugerir el puntaje.">${esc(a.pauta || '')}</textarea>
     </div>
+    <div id="bloque-grupo" class="space-y-2">
+      ${sec(3, 'Partes del ejercicio')}
+      <p class="text-xs text-slate-500">Cada parte puede ser de un tipo distinto y tiene su propio puntaje. El estudiante las responde todas en una misma ventana.</p>
+      <div id="partes-lista" class="space-y-3"></div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" data-addparte="alternativas" class="px-3 py-1.5 rounded-xl bg-sky-50 text-sky-700 text-sm font-semibold">+ ✅ Alternativas</button>
+        <button type="button" data-addparte="desarrollo" class="px-3 py-1.5 rounded-xl bg-violet-50 text-violet-700 text-sm font-semibold">+ ✍️ Desarrollo</button>
+        <button type="button" data-addparte="foto" class="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-sm font-semibold">+ 📷 Fotografía</button>
+      </div>
+      <p id="partes-total" class="text-sm font-semibold text-indigo-700"></p>
+    </div>
 
     ${sec(4, 'Puntaje y lugar')}
     <div class="grid grid-cols-2 gap-3">
-      <label class="block text-sm">Puntaje máximo<input name="puntaje_max" type="number" step="0.5" min="0.5" value="${esc(a.puntaje_max)}" class="${inp} mt-1"></label>
+      <label id="bloque-puntaje" class="block text-sm">Puntaje máximo<input name="puntaje_max" type="number" step="0.5" min="0.5" value="${esc(a.puntaje_max)}" class="${inp} mt-1"></label>
       <label class="block text-sm">📍 Punto de visita
         <select name="punto_id" class="${inp} mt-1"><option value="">(ninguno)</option>
         ${S.panel.puntos.map(p => `<option value="${esc(p.id)}" ${a.punto_id === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
@@ -182,6 +211,7 @@ function formActividad(id) {
   </form>`);
 
   const f = $('#f-act');
+
   const pintarOps = () => {
     $('#ops-lista').innerHTML = ops.map((o, i) => `<div class="flex items-center gap-2">
       <input type="radio" name="corr" value="${i}" ${i === corr ? 'checked' : ''} class="h-5 w-5 accent-emerald-600 shrink-0" title="Marcar como correcta">
@@ -189,30 +219,105 @@ function formActividad(id) {
       <input data-op="${i}" value="${esc(o)}" placeholder="Alternativa ${String.fromCharCode(65 + i)}" class="${inp} flex-1">
       ${ops.length > 2 ? `<button type="button" data-borrar-op="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button>` : ''}</div>`).join('');
   };
+  const totalPts = () => {
+    const t = partes.reduce((s, p) => s + (Number(p.puntaje) || 0), 0);
+    const el = $('#partes-total');
+    if (el) el.textContent = 'Puntaje total del ejercicio: ' + t + ' pt';
+  };
+  const pintarPartes = () => {
+    $('#partes-lista').innerHTML = partes.map((p, i) => {
+      let cuerpo = '';
+      if (p.tipo === 'alternativas') {
+        cuerpo = '<p class="text-xs text-slate-500">Marque con el círculo verde la correcta.</p>' +
+          p.opciones.map((o, j) => `<div class="flex items-center gap-2">
+            <input type="radio" name="pc_${i}" data-pi="${i}" value="${j}" ${j === p.corrIdx ? 'checked' : ''} class="h-5 w-5 accent-emerald-600 shrink-0">
+            <span class="h-7 w-7 shrink-0 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs">${String.fromCharCode(65 + j)}</span>
+            <input data-pk="op" data-pi="${i}" data-oj="${j}" value="${esc(o)}" placeholder="Alternativa ${String.fromCharCode(65 + j)}" class="${inp} flex-1">
+            ${p.opciones.length > 2 ? `<button type="button" data-delop="${i}:${j}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button>` : ''}</div>`).join('') +
+          `<button type="button" data-addop="${i}" class="text-xs font-semibold text-indigo-700">+ Agregar alternativa</button>`;
+      } else {
+        cuerpo = (p.tipo === 'foto' ? '<p class="text-xs text-slate-500">📷 El estudiante subirá una fotografía en esta parte.</p>' : '') +
+          `<textarea data-pk="pauta" data-pi="${i}" rows="2" class="${inp}" placeholder="Pauta de corrección (qué debe incluir una buena respuesta)">${esc(p.pauta)}</textarea>`;
+      }
+      return `<div class="rounded-2xl border-2 border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="h-7 w-7 shrink-0 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">${i + 1}</span>
+          <select data-pk="tipo" data-pi="${i}" class="${inp} flex-1">${optTipo(p.tipo)}</select>
+          <label class="text-xs flex items-center gap-1 shrink-0">Pts
+            <input data-pk="puntaje" data-pi="${i}" type="number" step="0.5" min="0.5" value="${esc(p.puntaje)}" class="w-16 border rounded-lg px-2 py-1 bg-white"></label>
+          <button type="button" data-delparte="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar parte">×</button>
+        </div>
+        <textarea data-pk="enunciado" data-pi="${i}" rows="2" class="${inp}" placeholder="Pregunta o instrucción de esta parte">${esc(p.enunciado)}</textarea>
+        ${cuerpo}
+      </div>`;
+    }).join('');
+    totalPts();
+  };
   pintarOps();
+  pintarPartes();
+
   const alternar = () => {
     const t = f.tipo.value;
     $('#bloque-alt').classList.toggle('hidden', t !== 'alternativas');
-    $('#bloque-pauta').classList.toggle('hidden', t === 'alternativas');
+    $('#bloque-pauta').classList.toggle('hidden', t !== 'desarrollo' && t !== 'foto');
+    $('#bloque-grupo').classList.toggle('hidden', t !== 'grupo');
+    $('#bloque-puntaje').classList.toggle('hidden', t === 'grupo');
+    $('#nota-enun').classList.toggle('hidden', t !== 'grupo');
+    f.enunciado.required = t !== 'grupo';
   };
   alternar();
+
   f.addEventListener('change', ev => {
-    if (ev.target.name === 'tipo') alternar();
-    if (ev.target.name === 'corr') corr = +ev.target.value;
+    const t = ev.target;
+    if (t.name === 'tipo') return alternar();
+    if (t.name === 'corr') { corr = +t.value; return; }
+    if (t.type === 'radio' && t.dataset.pi !== undefined) { partes[+t.dataset.pi].corrIdx = +t.value; return; }
+    if (t.dataset.pk === 'tipo') {
+      const p = partes[+t.dataset.pi];
+      p.tipo = t.value;
+      if (p.tipo === 'alternativas' && (!p.opciones || p.opciones.length < 2)) p.opciones = ['', '', '', ''];
+      pintarPartes();
+    }
   });
   f.addEventListener('input', ev => {
-    if (ev.target.dataset.op !== undefined) ops[+ev.target.dataset.op] = ev.target.value;
+    const t = ev.target;
+    if (t.dataset.op !== undefined) { ops[+t.dataset.op] = t.value; return; }
+    if (!t.dataset.pk || t.dataset.pk === 'tipo') return;
+    const p = partes[+t.dataset.pi];
+    if (!p) return;
+    if (t.dataset.pk === 'op') p.opciones[+t.dataset.oj] = t.value;
+    else p[t.dataset.pk] = t.value;
+    if (t.dataset.pk === 'puntaje') totalPts();
   });
   f.addEventListener('click', ev => {
-    const bo = ev.target.closest('[data-borrar-op]');
+    const T = ev.target;
+    const bo = T.closest('[data-borrar-op]');
     if (bo) {
       const i = +bo.dataset.borrarOp;
       ops.splice(i, 1);
       if (corr === i) corr = 0; else if (corr > i) corr--;
       return pintarOps();
     }
-    if (ev.target.id === 'ops-mas') { if (ops.length < 8) { ops.push(''); pintarOps(); } return; }
-    const q = ev.target.closest('[data-rapido]');
+    if (T.id === 'ops-mas') { if (ops.length < 8) { ops.push(''); pintarOps(); } return; }
+    const ap = T.closest('[data-addparte]');
+    if (ap) { partes.push(parteNueva(ap.dataset.addparte)); return pintarPartes(); }
+    const dp = T.closest('[data-delparte]');
+    if (dp) {
+      if (partes.length <= 1) return aviso('El ejercicio debe tener al menos una parte.', 'error');
+      partes.splice(+dp.dataset.delparte, 1);
+      return pintarPartes();
+    }
+    const ao = T.closest('[data-addop]');
+    if (ao) { const p = partes[+ao.dataset.addop]; if (p.opciones.length < 8) { p.opciones.push(''); pintarPartes(); } return; }
+    const dop = T.closest('[data-delop]');
+    if (dop) {
+      const [i, j] = dop.dataset.delop.split(':').map(Number);
+      const p = partes[i];
+      p.opciones.splice(j, 1);
+      if (p.corrIdx === j) p.corrIdx = 0; else if (p.corrIdx > j) p.corrIdx--;
+      return pintarPartes();
+    }
+    const q = T.closest('[data-rapido]');
     if (q) {
       const ini = new Date(), fn = new Date();
       if (q.dataset.rapido === 'dia') fn.setHours(23, 59, 0, 0); else fn.setTime(ini.getTime() + Number(q.dataset.rapido) * 3600e3);
@@ -220,16 +325,40 @@ function formActividad(id) {
       f.fecha_fin.value = aLocalInput(fn.toISOString());
     }
   });
+
   f.onsubmit = async ev => {
     ev.preventDefault();
     const d = new FormData(f), tipo = d.get('tipo');
-    const limpias = ops.map(s => s.trim());
-    let correcta = '', opciones = [];
+    let correcta = '', opciones = [], partesOut = [], pmax = +d.get('puntaje_max');
     if (tipo === 'alternativas') {
+      const limpias = ops.map(s => s.trim());
       opciones = limpias.filter(Boolean);
       correcta = limpias[corr] || '';
       if (opciones.length < 2) return aviso('Escriba al menos 2 alternativas.', 'error');
       if (!correcta) return aviso('Marque como correcta una alternativa que tenga texto.', 'error');
+    }
+    if (tipo === 'grupo') {
+      if (!partes.length) return aviso('Agregue al menos una parte.', 'error');
+      for (let i = 0; i < partes.length; i++) {
+        const p = partes[i];
+        if (!p.enunciado.trim()) return aviso('Escriba la pregunta de la parte ' + (i + 1) + '.', 'error');
+        if (p.tipo === 'alternativas') {
+          const o = p.opciones.map(s => s.trim());
+          if (o.filter(Boolean).length < 2) return aviso('La parte ' + (i + 1) + ' necesita al menos 2 alternativas.', 'error');
+          if (!o[p.corrIdx]) return aviso('En la parte ' + (i + 1) + ', marque como correcta una alternativa que tenga texto.', 'error');
+        }
+      }
+      partesOut = partes.map((p, i) => {
+        const o = p.opciones.map(s => s.trim());
+        return {
+          id: 'p' + (i + 1), tipo: p.tipo, enunciado: p.enunciado.trim(),
+          opciones: p.tipo === 'alternativas' ? o.filter(Boolean) : [],
+          correcta: p.tipo === 'alternativas' ? o[p.corrIdx] : '',
+          pauta: p.tipo === 'alternativas' ? '' : (p.pauta || '').trim(),
+          puntaje: Number(p.puntaje) || 1
+        };
+      });
+      pmax = partesOut.reduce((s, p) => s + p.puntaje, 0);
     }
     const ini = new Date(d.get('fecha_inicio')), fin2 = new Date(d.get('fecha_fin'));
     if (!(fin2 > ini)) return aviso('La hora de cierre debe ser posterior a la de apertura.', 'error');
@@ -240,9 +369,10 @@ function formActividad(id) {
       await api('guardarActividad', {
         imagenB64,
         actividad: {
-          id: id || '', titulo: d.get('titulo').trim(), tipo, enunciado: d.get('enunciado').trim(),
-          opciones, correcta, pauta: tipo === 'alternativas' ? '' : String(d.get('pauta') || '').trim(),
-          puntaje_max: +d.get('puntaje_max'), fecha_inicio: ini.toISOString(), fecha_fin: fin2.toISOString(),
+          id: id || '', titulo: d.get('titulo').trim(), tipo, enunciado: String(d.get('enunciado') || '').trim(),
+          opciones, correcta, partes: partesOut,
+          pauta: (tipo === 'desarrollo' || tipo === 'foto') ? String(d.get('pauta') || '').trim() : '',
+          puntaje_max: pmax, fecha_inicio: ini.toISOString(), fecha_fin: fin2.toISOString(),
           punto_id: d.get('punto_id'), imagen_id: a.imagen_id || '', orden: a.orden || '',
           requiere_gps: d.get('requiere_gps') ? 'si' : 'no'
         }
@@ -295,7 +425,6 @@ function formPunto(id) {
   const m = L.map('mapa-punto', { layers: [c.osm] });
   L.control.layers({ 'Calles': c.osm, 'Topográfico (relieve)': c.topo, 'Topográfico Esri': c.esri }).addTo(m);
   S.mapaModal = m;
-  // Los demás puntos ya creados, en gris
   const otros = S.panel.puntos.filter(q => q.id !== id && isFinite(q.lat) && isFinite(q.lng));
   otros.forEach(q => L.circleMarker([q.lat, q.lng], { radius: 6, color: '#64748b', fillColor: '#94a3b8', fillOpacity: 0.9 }).addTo(m).bindTooltip(q.nombre));
   let mk = null;
@@ -374,16 +503,23 @@ function bloqueActividad(a, est) {
     .sort((x, y) => nombreDe(x.rut).localeCompare(nombreDe(y.rut), 'es'));
   const resp = new Set(todas.map(r => rutKey(r.rut)));
   const sin = est.filter(e => !resp.has(rutKey(e.rut)));
+  let detalle;
+  if (a.tipo === 'grupo') {
+    detalle = (a.enunciado ? `<p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>` : '') +
+      (a.partes || []).map((p, i) => `<div class="mt-2 border-t pt-2"><b>Parte ${i + 1} (${TIPOS[p.tipo].nom}, ${esc(p.puntaje)} pt)</b>
+        <p class="whitespace-pre-line">${esc(p.enunciado)}</p>
+        ${p.tipo === 'alternativas' ? `<p class="text-emerald-700 font-semibold">✔ Correcta: ${esc(p.correcta)}</p>` : (p.pauta ? `<p><b>Pauta:</b> ${esc(p.pauta)}</p>` : '')}</div>`).join('');
+  } else {
+    detalle = `<p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>` +
+      (a.tipo === 'alternativas' ? `<p class="mt-2 text-emerald-700 font-semibold">✔ Correcta: ${esc(a.correcta)}</p>` : (a.pauta ? `<p class="mt-2"><b>Pauta:</b> ${esc(a.pauta)}</p>` : ''));
+  }
   return `<section>
     <div class="flex items-center gap-2 mb-2">
       <span class="h-9 w-9 rounded-xl bg-${T.c}-100 flex items-center justify-center text-xl">${T.ic}</span>
       <h3 class="font-bold flex-1">${esc(a.titulo)}</h3>
       <span class="text-xs bg-white/90 rounded-full px-2 py-1 shadow">${todas.length}/${est.length} respondieron</span>
     </div>
-    <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y pauta'}</summary>
-      <p class="mt-2 whitespace-pre-line">${esc(a.enunciado)}</p>
-      ${a.tipo === 'alternativas' ? `<p class="mt-2 text-emerald-700 font-semibold">✔ Correcta: ${esc(a.correcta)}</p>` : (a.pauta ? `<p class="mt-2"><b>Pauta:</b> ${esc(a.pauta)}</p>` : '')}
-    </details>
+    <details class="text-sm bg-white/80 rounded-xl p-3 mb-2"><summary class="cursor-pointer text-slate-600">Ver enunciado${a.tipo === 'alternativas' ? ' y alternativa correcta' : ' y pauta'}</summary>${detalle}</details>
     <div class="space-y-3">${rs.map(r => tarjetaResp(r, a)).join('') || '<div class="bg-white/80 rounded-2xl p-4 text-center text-slate-500 text-sm">No hay respuestas con este filtro.</div>'}</div>
     ${sin.length ? `<details class="mt-2 text-sm bg-amber-50 rounded-xl p-3"><summary class="cursor-pointer font-semibold text-amber-800">Sin responder (${sin.length})</summary>
       <ul class="mt-2 list-disc pl-5 text-slate-700">${sin.map(e => `<li>${esc(e.nombre)} <span class="text-xs text-slate-400">${esc(e.curso)}</span></li>`).join('')}</ul></details>` : ''}
@@ -396,32 +532,57 @@ function enlacesUbicacion(r) {
     <a class="underline text-teal-700" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${la},${lo}">Google Maps</a> ·
     <a class="underline text-teal-700" target="_blank" rel="noopener" href="https://earth.google.com/web/search/${la},${lo}">Google Earth</a></p>`;
 }
+function detalleGrupo(a, r) {
+  const resp = jsonSeguro(r.respuesta, {}), fotos = jsonSeguro(r.fotos, {});
+  return (a.partes || []).map((p, i) => {
+    const v = resp[p.id];
+    let cuerpo;
+    if (p.tipo === 'alternativas') {
+      const ok = String(v || '').trim() === String(p.correcta).trim();
+      cuerpo = `<p>${v ? esc(v) : '<i>(sin respuesta)</i>'}</p>
+        <div class="mt-1">${ok ? chip('Correcta', 'emerald') : chip('Incorrecta', 'rose')} <span class="text-xs text-slate-500">${esc(p.puntaje)} pt</span></div>`;
+    } else {
+      cuerpo = `<p class="whitespace-pre-line">${v ? esc(v) : '<i>(sin texto)</i>'}</p>` +
+        (p.tipo === 'foto' && fotos[p.id] ? `<button data-accion="ver-foto" data-id="${esc(fotos[p.id])}" class="text-sm underline text-teal-700 mt-1">📷 Ver fotografía</button> ` : '') +
+        `<span class="text-xs text-slate-500">${esc(p.puntaje)} pt</span>`;
+    }
+    return `<div class="rounded-xl bg-white border p-2">
+      <div class="text-xs font-semibold text-slate-500">Parte ${i + 1} · ${TIPOS[p.tipo].nom}</div>
+      <div class="text-xs text-slate-500 mb-1 whitespace-pre-line">${esc(p.enunciado)}</div>${cuerpo}</div>`;
+  }).join('');
+}
 function tarjetaResp(r, a) {
-  const alt = a.tipo === 'alternativas';
+  const alt = a.tipo === 'alternativas', grupo = a.tipo === 'grupo';
   const ok = alt && String(r.respuesta).trim() === String(a.correcta).trim();
-  const p0 = r.puntaje_final !== '' && r.puntaje_final != null ? r.puntaje_final : (tieneIA(r) ? r.puntaje_ia : '');
+  const manual = hayParteManual(a);
+  const p0 = r.estado === 'evaluada' ? r.puntaje_final
+    : (tieneIA(r) ? r.puntaje_ia : (r.puntaje_final !== '' && r.puntaje_final != null ? r.puntaje_final : ''));
   const c0 = r.retro_docente || r.comentario_ia || '';
   const inp = 'border rounded-xl px-3 py-2';
+  const caja = grupo
+    ? `<div class="space-y-2">${detalleGrupo(a, r)}</div>`
+    : `<div class="text-sm bg-slate-50 rounded-xl p-3">
+        <div class="text-xs font-semibold text-slate-500 mb-1">Respuesta del estudiante</div>
+        <p class="whitespace-pre-line">${r.respuesta ? esc(r.respuesta) : '<i>(solo fotografía)</i>'}</p>
+        ${alt ? `<div class="mt-2">${ok ? chip('Correcta', 'emerald') : chip('Incorrecta', 'rose')}</div>` : ''}
+      </div>`;
   return `<article id="ev-${esc(r.id)}" class="bg-white/95 rounded-2xl shadow p-4 space-y-2">
     <div class="flex justify-between gap-2 items-start">
       <div><b>${esc(nombreDe(r.rut))}</b><div class="text-xs text-slate-400">${fechaCorta(r.timestamp_cliente || r.timestamp_servidor)}</div></div>
       ${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Por evaluar', 'amber')}
     </div>
-    <div class="text-sm bg-slate-50 rounded-xl p-3">
-      <div class="text-xs font-semibold text-slate-500 mb-1">Respuesta del estudiante</div>
-      <p class="whitespace-pre-line">${esc(r.respuesta) || '<i>(solo fotografía)</i>'}</p>
-      ${alt ? `<div class="mt-2">${ok ? chip('Correcta', 'emerald') : chip('Incorrecta', 'rose')}</div>` : ''}
-    </div>
-    ${r.foto_id ? `<button data-accion="ver-foto" data-id="${esc(r.foto_id)}" class="text-sm underline text-teal-700">📷 Ver fotografía</button>` : ''}
+    ${caja}
+    ${!grupo && r.foto_id ? `<button data-accion="ver-foto" data-id="${esc(r.foto_id)}" class="text-sm underline text-teal-700">📷 Ver fotografía</button>` : ''}
     ${enlacesUbicacion(r)}
     <div class="flex flex-wrap gap-2 items-start">
       <input data-campo="puntaje" type="number" step="0.5" min="0" max="${esc(a.puntaje_max)}" value="${esc(p0)}" placeholder="Pts" class="${inp} w-24">
       <textarea data-campo="retro" rows="2" placeholder="Comentario breve para el estudiante" class="${inp} flex-1 min-w-[12rem]">${esc(c0)}</textarea>
     </div>
+    ${grupo && r.estado !== 'evaluada' ? '<p class="text-xs text-slate-500">El puntaje de las alternativas ya está sumado. Complete el de las partes de desarrollo y fotografía, o use la IA.</p>' : ''}
     ${tieneIA(r) ? `<p class="text-xs text-indigo-600">🤖 Sugerencia de la IA: ${esc(r.puntaje_ia)} de ${esc(a.puntaje_max)} pt. Revísela antes de aprobar.</p>` : ''}
     <div class="flex flex-wrap gap-2">
-      ${alt ? '' : `<button data-accion="ia-uno" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🤖 Sugerir con IA</button>`}
-      ${!alt && tieneIA(r) ? `<button data-accion="aprobar-ia" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">✔ Aprobar sugerencia</button>` : ''}
+      ${manual ? `<button data-accion="ia-uno" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🤖 Sugerir con IA</button>` : ''}
+      ${manual && tieneIA(r) ? `<button data-accion="aprobar-ia" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">✔ Aprobar sugerencia</button>` : ''}
       <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button>
     </div></article>`;
 }
@@ -457,7 +618,7 @@ async function iaTodas() {
   const f = S.filtroR;
   const rs = S.panel.respuestas.filter(r => {
     const a = actPor(r.actividad_id);
-    return a && a.tipo !== 'alternativas' && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
+    return a && hayParteManual(a) && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
   });
   if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
   let n = 0;
@@ -524,15 +685,16 @@ async function reporteIndividual(key) {
     const logo = S.insignia || await cargarInsignia();
     const acts = S.panel.actividades;
     const fotos = {};
-    for (const r of d.rs) if (r.foto_id) fotos[r.foto_id] = await dataUrlArchivo(r.foto_id).catch(() => null);
+    for (const r of d.rs) for (const fid of fotosDe(r)) fotos[fid] = await dataUrlArchivo(fid).catch(() => null);
     const resp = d.rs.map(r => ({ lat: r.lat, lng: r.lng, n: acts.findIndex(a => a.id === r.actividad_id) + 1 }));
     const detalle = acts.map((a, i) => {
       const r = d.rs.find(x => x.actividad_id === a.id);
       const hayGPS = r && isFinite(parseFloat(r.lat)) && isFinite(parseFloat(r.lng));
+      const imgs = r ? fotosDe(r).filter(fid => fotos[fid]).map(fid => `<img src="${fotos[fid]}" style="max-height:200px;max-width:48%;border-radius:6px;margin-right:6px">`).join('') : '';
       return `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-bottom:10px">
         <b>${i + 1}. ${esc(a.titulo)}</b> <span style="color:#64748b">(${esc(a.puntaje_max)} pt)</span>
-        ${r ? `<p style="margin:6px 0;white-space:pre-line">${esc(r.respuesta) || '<i>(solo fotografía)</i>'}</p>
-          ${r.foto_id && fotos[r.foto_id] ? `<img src="${fotos[r.foto_id]}" style="max-height:200px;max-width:100%;border-radius:6px">` : ''}
+        ${r ? `<p style="margin:6px 0;white-space:pre-line">${esc(respuestaTexto(a, r)) || '<i>(solo fotografía)</i>'}</p>
+          ${imgs}
           <p style="margin:6px 0;color:#475569">Hora: ${fechaCorta(r.timestamp_cliente || r.timestamp_servidor)}${hayGPS ? ' · Ubicación: ' + Number(r.lat).toFixed(5) + ', ' + Number(r.lng).toFixed(5) : ''}</p>
           <p style="margin:0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) : 'Por evaluar'}${r.retro_docente ? ` · <b>Nota del docente:</b> ${esc(r.retro_docente)}` : ''}</p>`
           : '<p style="margin:6px 0;color:#be123c">Sin respuesta.</p>'}</div>`;
@@ -648,8 +810,13 @@ async function accionDocente(a, b, id) {
     case 'ia-todas': return iaTodas();
     case 'ver-foto': {
       cargando(true, 'Cargando fotografía…');
-      const u = await dataUrlArchivo(id); cargando(false);
-      return modal(`<div class="pt-4"><img src="${u}" class="w-full rounded-xl" alt="Fotografía"></div>`);
+      let u = null;
+      try { u = await dataUrlArchivo(id); } catch (_) { u = null; }
+      cargando(false);
+      return modal(`<div class="pt-4">${u
+        ? `<img src="${u}" class="w-full rounded-xl" alt="Fotografía">`
+        : '<p class="text-rose-600 text-sm">No se pudo mostrar la imagen aquí.</p>'}
+        <a class="block mt-2 text-sm underline text-teal-700" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(id)}/view">Abrir en Google Drive</a></div>`);
     }
     case 'rep-ind': return reporteIndividual($('#sel-est').value);
     case 'rep-gen': return reporteGeneral();
