@@ -3,6 +3,7 @@
    SALIDA A TERRENO – Complementos, Parte 2: Recorrido
    Kilómetros · calorías · ruta con alturas · fotos en los momentos indicados
    Pestañas de recorridos · barra de avance · informes formales (PDF)
+   Lista de estudiantes · evaluación de quienes no enviaron nada
    Se carga después de app-extra.js (y de app-docente.js en el panel docente)
    ========================================================= */
 
@@ -20,6 +21,7 @@ const hora = t => new Date(t).toLocaleTimeString('es-CL', { hour: '2-digit', min
 const r5 = x => Math.round(x * 1e5) / 1e5;
 const claveRec = a => 'rec:' + S.usuario.key + ':' + a.id;
 const pinIcon = n => L.divIcon({ className: '', html: '<div class="pin">' + n + '</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
+const esSinResp = r => String((r && r.client_id) || '').indexOf('doc-') === 0;   // evaluada por el docente sin respuesta
 
 // Gasto energético aproximado al caminar (ecuación ACSM: depende de la velocidad y la pendiente)
 function kcalEstim(d, movS, sub, peso) {
@@ -527,6 +529,7 @@ function verRec(id, doc) {
 /* ---------- Estudiante: tarjeta de la actividad ---------- */
 function tarjetaRec(a) {
   const v = estadoVentana(a), r = respuestaDe(a), hs = hitosDe(a), T = TIPOS.recorrido;
+  const rec = r ? recDe(r) : null;
   let est;
   if (r) est = r.origen === 'local' ? chip('Por enviar', 'amber') : r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Enviada', 'sky');
   else est = v === 'abierta' ? chip('Abierta', 'emerald') : v === 'pronto' ? chip('Aún no abre', 'slate') : chip('Cerrada', 'rose');
@@ -536,11 +539,11 @@ function tarjetaRec(a) {
     else if (v === 'pronto') tiempo = `🔒 Abre el ${fechaCorta(a.fecha_inicio)}`;
     else tiempo = `⌛ Cerró el ${fechaCorta(a.fecha_fin)}`;
   }
-  const rec = r ? recDe(r) : null;
   let boton;
-  if (r) boton = `<button data-accion="rec-ver" data-id="${esc(a.id)}" class="mt-3 w-full bg-white border-2 border-teal-600 text-teal-700 font-bold py-2.5 rounded-2xl">🗺️ Ver mi recorrido</button>`;
+  if (r) boton = rec ? `<button data-accion="rec-ver" data-id="${esc(a.id)}" class="mt-3 w-full bg-white border-2 border-teal-600 text-teal-700 font-bold py-2.5 rounded-2xl">🗺️ Ver mi recorrido</button>` : '';
   else if (v === 'abierta') boton = `<button data-accion="responder" data-id="${esc(a.id)}" class="mt-3 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-2xl shadow">🥾 Abrir recorrido</button>`;
   else boton = `<button disabled class="mt-3 w-full bg-slate-200 text-slate-500 font-semibold py-3 rounded-2xl">${v === 'pronto' ? 'Todavía no disponible' : 'El plazo terminó'}</button>`;
+  const sinRec = r && !rec ? '<div class="mt-2 text-xs text-slate-500">Su profesor registró esta actividad sin que se enviara un recorrido.</div>' : '';
   let res = '';
   if (r && r.estado === 'evaluada') res = bloqueEvaluacion(a, r);
   else if (r && r.origen !== 'local') res = '<div class="mt-2 text-xs text-slate-500">Su profesor revisará su recorrido. Cuando termine, pinche «🔄 Actualizar» para ver su evaluación.</div>';
@@ -550,7 +553,7 @@ function tarjetaRec(a) {
         <div class="flex-1 min-w-0"><h3 class="font-bold leading-tight">${esc(a.titulo)}</h3><p class="text-xs text-slate-500">${T.nom}${hs.length ? ' · ' + hs.length + ' fotografía(s)' : ''} · ${esc(a.puntaje_max)} pt</p></div>${est}</div>
       ${tiempo ? `<div class="mt-2 text-xs font-semibold text-slate-600">${tiempo}</div>` : ''}
       ${rec ? `<div class="mt-2 rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-sm">🥾 <b>${fmtKm(rec.dist)}</b> · ${fmtDur(rec.dur)} · ⬆️ +${rec.sub} m · 🔥 ≈ ${rec.kcal} kcal</div>` : ''}
-      ${res}${boton}</div></article>`;
+      ${sinRec}${res}${boton}</div></article>`;
 }
 const _tarjetaActividadRec = tarjetaActividad;
 tarjetaActividad = function (a) { return esRec(a) ? tarjetaRec(a) : _tarjetaActividadRec(a); };
@@ -581,9 +584,14 @@ function vistaMisRec() {
       : '<div class="text-sm opacity-90 mt-1">Aún no ha terminado ningún recorrido. Cuando lo haga, aquí verá su camino, las fotografías y las calorías.</div>'}</div>`;
   const tarjetas = acts.map(a => {
     const r = respuestaDe(a), rec = r ? recDe(r) : null, v = estadoVentana(a);
-    if (!rec) return `<article class="bg-white/95 rounded-3xl shadow p-4 flex items-center gap-3"><div class="text-3xl">🥾</div>
-      <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${esc(a.titulo)}</div><div class="text-xs text-slate-500">Aún no lo realiza</div></div>
-      ${v === 'abierta' ? `<button data-accion="responder" data-id="${esc(a.id)}" class="shrink-0 bg-teal-700 text-white font-bold px-4 py-2 rounded-xl text-sm">Abrir</button>` : chip(v === 'pronto' ? 'Aún no abre' : 'Cerrada', v === 'pronto' ? 'slate' : 'rose')}</article>`;
+    if (!rec) {
+      if (r) return `<article class="bg-white/95 rounded-3xl shadow p-4 space-y-2"><div class="flex items-start gap-2"><div class="text-3xl">🥾</div>
+        <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${esc(a.titulo)}</div><div class="text-xs text-slate-500">Registrado por su profesor, sin recorrido enviado</div></div>
+        ${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Enviada', 'sky')}</div>${r.estado === 'evaluada' ? bloqueEvaluacion(a, r) : ''}</article>`;
+      return `<article class="bg-white/95 rounded-3xl shadow p-4 flex items-center gap-3"><div class="text-3xl">🥾</div>
+        <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${esc(a.titulo)}</div><div class="text-xs text-slate-500">Aún no lo realiza</div></div>
+        ${v === 'abierta' ? `<button data-accion="responder" data-id="${esc(a.id)}" class="shrink-0 bg-teal-700 text-white font-bold px-4 py-2 rounded-xl text-sm">Abrir</button>` : chip(v === 'pronto' ? 'Aún no abre' : 'Cerrada', v === 'pronto' ? 'slate' : 'rose')}</article>`;
+    }
     const loc = r.origen === 'local', fot = loc ? (r.fotosB64 || {}) : jsonSeguro(r.fotos, {});
     const mini = hitosDe(a).filter(h => fot[h.id]).map(h => `<figure class="w-28 shrink-0">
       ${loc ? `<img src="${fot[h.id]}" class="h-24 w-28 object-cover rounded-xl">` : `<img data-archivo="${esc(fot[h.id])}" data-zoom="1" class="h-24 w-28 object-cover rounded-xl bg-slate-100">`}
@@ -644,6 +652,44 @@ renderEstudiante = function () {
   const c = $('#est-info > div');
   if (t.n && c) c.insertAdjacentHTML('beforeend', `<div class="mt-3 text-xs bg-white/20 rounded-xl px-3 py-2">🥾 Sus recorridos: <b>${fmtKm(t.dist)}</b> · ⬆️ +${Math.round(t.sub)} m · 🔥 ≈ ${Math.round(t.kcal)} kcal</div>`);
 };
+
+/* ---------- Mapa del estudiante: «Centrar» muestra el trayecto, el camino y la distancia ---------- */
+let lineaTray = null;
+const _renderMapaEstTray = renderMapaEst;
+renderMapaEst = function () {
+  _renderMapaEstTray();
+  lineaTray = null;
+  const b = $('#est-contenido [data-accion="centrar"]');
+  if (b) b.outerHTML = `<button data-accion="ver-trayecto" class="w-full bg-white border-2 border-teal-600 text-teal-700 font-bold py-2.5 rounded-2xl">📍 Centrar y ver mi trayecto</button>
+    <p class="text-xs text-slate-500 text-center">Lo lleva a donde usted está y le muestra el camino hasta el lugar más cercano, con la distancia que debe recorrer.</p>
+    <div id="trayecto-info" class="hidden rounded-2xl bg-white shadow p-3 text-sm"></div>`;
+};
+async function verTrayecto() {
+  if (!S.mapa) return;
+  let pos = S.pos;
+  if (!pos) {
+    aviso('Buscando su ubicación…');
+    const p = await obtenerPosicion();
+    if (p) { pos = [p.lat, p.lng]; S.pos = pos; }
+  }
+  if (!pos) return aviso('Aún no tenemos su ubicación. Active el GPS y permita el acceso.', 'error');
+  S.mapa.setView(pos, 15);
+  const pts = (S.datos.puntos || []).filter(p => isFinite(p.lat) && isFinite(p.lng));
+  const info = $('#trayecto-info');
+  if (!pts.length || !info) return;
+  const cer = pts.map(q => ({ q, d: distM(pos, [q.lat, q.lng]) })).sort((x, y) => x.d - y.d)[0];
+  info.classList.remove('hidden');
+  info.innerHTML = '⏳ Calculando el camino hasta «' + esc(cer.q.nombre) + '»…';
+  const m = await rutasHasta(pos, [cer.q]);
+  const r = m[cer.q.id];
+  if (!S.mapa || !$('#trayecto-info')) return;
+  $('#trayecto-info').innerHTML = '<b>Lugar más cercano: ' + esc(cer.q.nombre) + '</b><br>' + textoRuta(r, cer.d);
+  if (lineaTray) lineaTray.remove();
+  lineaTray = (r && r.poli)
+    ? L.polyline(decodePoli(r.poli), { color: '#0f766e', weight: 5, opacity: 0.9 }).addTo(S.mapa)
+    : L.polyline([pos, [cer.q.lat, cer.q.lng]], { color: '#0f766e', weight: 3, dashArray: '6 8' }).addTo(S.mapa);
+  S.mapa.fitBounds(L.latLngBounds([pos, [cer.q.lat, cer.q.lng]]).extend(lineaTray.getBounds()), { padding: [40, 40] });
+}
 
 /* =========================================================
    PANEL DOCENTE
@@ -749,11 +795,144 @@ if (typeof accionDocente === 'function') {
       } catch (e) { cargando(false); aviso(e.message, 'error'); }
     };
   }
-  // Editar un recorrido abre este formulario; también el botón «Nuevo recorrido»
+
+  /* --- Evaluar a un estudiante que no envió nada --- */
+  function formEvalSin(actId, rutK) {
+    const a = actPor(actId), e = S.panel.estudiantes.find(x => rutKey(x.rut) === rutK);
+    if (!a || !e) return;
+    modal(`<form id="f-evsin" class="space-y-3 pt-2">
+      <h3 class="text-lg font-extrabold pr-6">✏️ Evaluar sin respuesta</h3>
+      <div class="rounded-xl bg-slate-50 p-3 text-sm"><div><b>${esc(e.nombre)}</b> <span class="text-xs text-slate-400">${esc(e.curso)}</span></div><div>Actividad: ${esc(a.titulo)}</div></div>
+      <p class="text-xs text-slate-500">El estudiante no envió nada. Puede registrar igual un puntaje y un comentario: quedará como «evaluada» y contará en su nota. Para el estudiante la actividad aparecerá como realizada.</p>
+      <label class="block text-sm font-semibold">Puntaje (de 0 a ${esc(a.puntaje_max)})
+        <input name="p" type="number" step="0.1" min="0" max="${esc(a.puntaje_max)}" value="0" class="${INPR} mt-1"></label>
+      <div class="flex gap-2"><button type="button" id="evs-0" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm font-semibold">0 pt</button>
+        <button type="button" id="evs-max" class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-semibold">Puntaje completo (${esc(a.puntaje_max)})</button></div>
+      <label class="block text-sm font-semibold">Comentario (opcional, breve)
+        <textarea name="c" rows="2" class="${INPR} mt-1" placeholder="Por ejemplo: no realizó la actividad"></textarea></label>
+      <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar evaluación</button></form>`);
+    const f = $('#f-evsin');
+    $('#evs-0').onclick = () => { f.p.value = 0; };
+    $('#evs-max').onclick = () => { f.p.value = Number(a.puntaje_max); };
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      cargando(true, 'Guardando…');
+      try {
+        await api('evaluarSinRespuesta', { rut: rutK, actividad_id: actId, puntaje_final: Number(f.p.value) || 0, retro: f.c.value.trim() });
+        cerrarModal(); await cargarPanel(); renderDocente(); aviso('Evaluación guardada.');
+      } catch (err) { cargando(false); aviso(err.message, 'error'); }
+    };
+  }
+  // En «Sin responder» cada estudiante tiene un botón para evaluarlo igual
+  const _bloqueActividadSin = bloqueActividad;
+  bloqueActividad = function (a, est) {
+    let h = _bloqueActividadSin(a, est);
+    if (esRec(a)) h = h.replace('🧩', '🥾');
+    const resp = new Set(S.panel.respuestas.filter(r => r.actividad_id === a.id).map(r => rutKey(r.rut)));
+    const sin = est.filter(e => !resp.has(rutKey(e.rut)));
+    if (!sin.length) return h;
+    const nuevo = `<details class="mt-2 text-sm bg-amber-50 rounded-xl p-3"><summary class="cursor-pointer font-semibold text-amber-800">Sin responder (${sin.length}) · puede evaluarlos igual</summary>
+      <ul class="mt-2 space-y-1">${sin.map(e => `<li class="flex items-center gap-2"><span class="flex-1 min-w-0">${esc(e.nombre)} <span class="text-xs text-slate-400">${esc(e.curso)}</span></span>
+        <button data-accion="eval-sin" data-id="${esc(a.id)}" data-rut="${esc(rutKey(e.rut))}" class="shrink-0 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-semibold">✏️ Evaluar</button></li>`).join('')}</ul></details>`;
+    return h.replace(/<details class="mt-2 text-sm bg-amber-50[\s\S]*?<\/details>/, () => nuevo);
+  };
+
+  /* --- Estudiantes: lista, edición y eliminación --- */
+  const FILT_E = { q: '', curso: '' };
+  const firmaVigente = k => { const v = (S.panel.carta && S.panel.carta.version) || ''; return S.panel.firmas.some(f => rutKey(f.rut) === k && String(f.carta_version || '') === v); };
+  function listaEstHTML() {
+    const q = FILT_E.q.toLowerCase().trim();
+    const l = S.panel.estudiantes.filter(e => (!FILT_E.curso || e.curso === FILT_E.curso) && (!q || (e.nombre + ' ' + e.rut).toLowerCase().indexOf(q) >= 0))
+      .sort((x, y) => String(x.nombre).localeCompare(String(y.nombre), 'es'));
+    if (!l.length) return '<p class="text-sm text-slate-500 py-4 text-center">No hay estudiantes con ese filtro.</p>';
+    return l.map(e => {
+      const k = rutKey(e.rut), activo = String(e.activo).toLowerCase() !== 'no';
+      const nr = S.panel.respuestas.filter(r => rutKey(r.rut) === k).length;
+      return `<div class="flex flex-wrap items-center gap-2 border-t py-2">
+        <div class="flex-1 min-w-[12rem]"><div class="font-semibold">${esc(e.nombre)}</div><div class="text-xs text-slate-500">RUT ${esc(e.rut)} · ${esc(e.curso)}</div></div>
+        ${activo ? chip('Activo', 'emerald') : chip('Inactivo', 'slate')} ${firmaVigente(k) ? chip('Firmó', 'sky') : chip('Sin firma', 'amber')}
+        <span class="text-xs text-slate-500">${nr} respuesta(s)</span>
+        <button data-accion="est-editar" data-rut="${esc(k)}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm">✏️ Editar</button>
+        <button data-accion="est-activar" data-rut="${esc(k)}" class="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 text-sm">${activo ? 'Desactivar' : 'Activar'}</button>
+        <button data-accion="est-eliminar" data-rut="${esc(k)}" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-sm" aria-label="Eliminar">🗑️</button></div>`;
+    }).join('');
+  }
+  function renderEstudiantesDoc() {
+    const cursos = Array.from(new Set(S.panel.estudiantes.map(e => e.curso).filter(Boolean))).sort();
+    $('#doc-contenido').innerHTML = `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">
+      <div class="flex flex-wrap items-center gap-2"><h3 class="font-bold text-lg flex-1">👥 Estudiantes <span class="text-sm font-normal text-slate-500">(${S.panel.estudiantes.length})</span></h3>
+        <button data-accion="est-nuevo" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">+ Agregar estudiante</button></div>
+      <div class="flex flex-wrap gap-2"><input id="est-buscar" placeholder="Buscar por nombre o RUT" value="${esc(FILT_E.q)}" class="${INPR} flex-1 min-w-[12rem]">
+        <select id="est-curso" class="border rounded-xl px-3 py-2"><option value="">Todos los cursos</option>${cursos.map(c => `<option value="${esc(c)}" ${FILT_E.curso === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div id="est-lista">${listaEstHTML()}</div>
+      <p class="text-xs text-slate-500"><b>Desactivar</b> conserva sus datos, pero le impide ingresar y lo saca de los informes. <b>Eliminar</b> borra al estudiante, sus respuestas y su firma, y no se puede deshacer. Para cargar muchos estudiantes de una vez use Ajustes → Cargar nómina.</p></div>`;
+  }
+  document.addEventListener('input', ev => {
+    if (ev.target.id !== 'est-buscar') return;
+    FILT_E.q = ev.target.value;
+    const c = $('#est-lista'); if (c) c.innerHTML = listaEstHTML();
+  });
+  document.addEventListener('change', ev => {
+    if (ev.target.id !== 'est-curso') return;
+    FILT_E.curso = ev.target.value;
+    const c = $('#est-lista'); if (c) c.innerHTML = listaEstHTML();
+  });
+  function formEstudiante(rutK) {
+    const e = rutK ? S.panel.estudiantes.find(x => rutKey(x.rut) === rutK) : null;
+    modal(`<form id="f-est" class="space-y-3 pt-2">
+      <h3 class="text-lg font-extrabold pr-6">${e ? '✏️ Editar estudiante' : '+ Agregar estudiante'}</h3>
+      <label class="block text-sm font-semibold">Nombre completo<input name="nombre" required class="${INPR} mt-1" value="${esc(e ? e.nombre : '')}"></label>
+      <label class="block text-sm font-semibold">RUT<input name="rut" required placeholder="12.345.678-5" class="${INPR} mt-1" value="${esc(e ? e.rut : '')}"></label>
+      <label class="block text-sm font-semibold">Curso<input name="curso" required placeholder="3° Medio A" class="${INPR} mt-1" value="${esc(e ? e.curso : '')}"></label>
+      <label class="block text-sm font-semibold">Estado
+        <select name="activo" class="${INPR} mt-1"><option value="si">Activo (puede ingresar)</option><option value="no" ${e && String(e.activo).toLowerCase() === 'no' ? 'selected' : ''}>Inactivo (no puede ingresar ni aparece en los informes)</option></select></label>
+      ${e ? '<p class="text-xs text-slate-500">Si cambia el RUT, se actualiza también en sus respuestas y firmas.</p>' : ''}
+      <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar</button></form>`);
+    const f = $('#f-est');
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      const rut = normalizarRut(f.rut.value);
+      if (!rut) return aviso('El RUT no es válido. Revíselo e intente de nuevo.', 'error');
+      cargando(true, 'Guardando…');
+      try {
+        await api('guardarEstudiante', { rut_original: e ? rutKey(e.rut) : '', rut, nombre: f.nombre.value.trim(), curso: f.curso.value.trim(), activo: f.activo.value });
+        cerrarModal(); await cargarPanel(); renderDocente(); aviso(e ? 'Estudiante actualizado.' : 'Estudiante agregado.');
+      } catch (err) { cargando(false); aviso(err.message, 'error'); }
+    };
+  }
+  async function cambiarActivo(rutK) {
+    const e = S.panel.estudiantes.find(x => rutKey(x.rut) === rutK);
+    if (!e) return;
+    const activo = String(e.activo).toLowerCase() !== 'no';
+    if (activo && !confirm('¿Desactivar a ' + e.nombre + '? No podrá ingresar y no aparecerá en los informes. Sus datos se conservan y puede volver a activarlo.')) return;
+    cargando(true, 'Guardando…');
+    try {
+      await api('guardarEstudiante', { rut_original: rutK, rut: e.rut, nombre: e.nombre, curso: e.curso, activo: activo ? 'no' : 'si' });
+      await cargarPanel(); renderDocente(); aviso(activo ? 'Estudiante desactivado.' : 'Estudiante activado.');
+    } catch (err) { cargando(false); aviso(err.message, 'error'); }
+  }
+  async function eliminarEst(rutK) {
+    const e = S.panel.estudiantes.find(x => rutKey(x.rut) === rutK);
+    if (!e) return;
+    const nr = S.panel.respuestas.filter(r => rutKey(r.rut) === rutK).length;
+    if (!confirm('¿Eliminar a ' + e.nombre + '?\n\nSe borrarán el estudiante, sus ' + nr + ' respuesta(s) y su firma. Esta acción NO se puede deshacer.\n\nSi solo quiere que no aparezca, use «Desactivar».')) return;
+    cargando(true, 'Eliminando…');
+    try {
+      await api('eliminarEstudiante', { rut: rutK });
+      await cargarPanel(); renderDocente(); aviso('Estudiante eliminado.');
+    } catch (err) { cargando(false); aviso(err.message, 'error'); }
+  }
+
+  // Acciones del panel que maneja este archivo
   const _accionDocenteRec = accionDocente;
   accionDocente = async function (a, b, id) {
     if (a === 'nuevo-rec') return formRecorrido();
     if (a === 'editar-act' && esRec(actPor(id))) return formRecorrido(id);
+    if (a === 'eval-sin') return formEvalSin(id, b.dataset.rut);
+    if (a === 'est-nuevo') return formEstudiante();
+    if (a === 'est-editar') return formEstudiante(b.dataset.rut);
+    if (a === 'est-activar') return cambiarActivo(b.dataset.rut);
+    if (a === 'est-eliminar') return eliminarEst(b.dataset.rut);
     return _accionDocenteRec(a, b, id);
   };
   const _renderActividadesRec = renderActividades;
@@ -768,8 +947,9 @@ if (typeof accionDocente === 'function') {
     });
   };
 
-  /* --- Pestaña «Recorridos» del docente --- */
+  /* --- Pestañas «Recorridos» y «Estudiantes» del docente --- */
   if (!TABS_DOC.some(t => t[0] === 'recorridos')) TABS_DOC.splice(4, 0, ['recorridos', '🥾 Recorridos']);
+  if (!TABS_DOC.some(t => t[0] === 'estudiantes')) TABS_DOC.splice(TABS_DOC.findIndex(t => t[0] === 'recorridos') + 1, 0, ['estudiantes', '👥 Estudiantes']);
   function renderRecorridosDoc() {
     const est = calcularEstudiantes(), T = totalesRec(est);
     const kpi = (t, v) => `<div class="rounded-2xl bg-white/95 shadow p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
@@ -795,7 +975,7 @@ if (typeof accionDocente === 'function') {
     $('#doc-tabs').innerHTML = TABS_DOC.map(([k, t]) =>
       `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}${k === 'respuestas' && porEvaluar ? ` <span class="ml-1 text-xs bg-amber-400 text-slate-900 rounded-full px-1.5">${porEvaluar}</span>` : ''}</button>`).join('');
     detenerMapa();
-    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
+    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, estudiantes: renderEstudiantesDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
     f();
   };
 
@@ -809,7 +989,7 @@ if (typeof accionDocente === 'function') {
       <div class="flex justify-between gap-2 items-start"><div><b>${esc(nombreDe(r.rut))}</b><div class="text-xs text-slate-400">${fechaCorta(r.timestamp_cliente || r.timestamp_servidor)}</div></div>
         ${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Por evaluar', 'amber')}</div>
       ${rec ? `<div class="text-sm bg-emerald-50 rounded-xl p-2">🥾 <b>${fmtKm(rec.dist)}</b> · ${fmtDur(rec.dur)} · ⬆️ +${rec.sub} m · ⬇️ −${rec.baj} m · 🔥 ≈ ${rec.kcal} kcal</div>`
-        : '<p class="text-xs text-rose-600">Esta respuesta no trae datos del recorrido.</p>'}
+        : (esSinResp(r) ? '<p class="text-xs text-slate-600">Sin respuesta del estudiante (evaluada por el docente).</p>' : '<p class="text-xs text-rose-600">Esta respuesta no trae datos del recorrido.</p>')}
       <p class="text-xs text-slate-600">📷 Fotografías: <b>${nf} de ${hs.length}</b>${lejos ? ` · ${lejos} tomada(s) a más de 100 m del lugar` : ''}</p>
       ${rec && rec.amb0 ? `<p class="text-xs text-slate-600">🌍 Al iniciar: ${fmtClima(rec.amb0)}</p>` : ''}
       ${rec ? `<button data-accion="rec-ver" data-id="${esc(r.id)}" data-doc="1" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🗺️ Ver recorrido, alturas y fotos</button>` : ''}
@@ -822,7 +1002,12 @@ if (typeof accionDocente === 'function') {
         <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button></div></article>`;
   }
   const _tarjetaRespRec = tarjetaResp;
-  tarjetaResp = function (r, a) { return esRec(a) ? tarjetaRecDoc(r, a) : _tarjetaRespRec(r, a); };
+  tarjetaResp = function (r, a) {
+    if (esRec(a)) return tarjetaRecDoc(r, a);
+    let h = _tarjetaRespRec(r, a);
+    if (esSinResp(r)) h = h.replace('<i>(solo fotografía)</i>', '<i>Sin respuesta del estudiante (evaluada por el docente)</i>');
+    return h;
+  };
   const _renderRespuestasRec = renderRespuestas;
   renderRespuestas = function () {
     _renderRespuestasRec();
@@ -834,7 +1019,7 @@ if (typeof accionDocente === 'function') {
     const f = S.filtroR;
     const rs = S.panel.respuestas.filter(r => {
       const a = actPor(r.actividad_id);
-      return a && !esRec(a) && hayParteManual(a) && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
+      return a && !esRec(a) && !esSinResp(r) && hayParteManual(a) && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
     });
     if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
     let n = 0;
@@ -889,6 +1074,7 @@ if (typeof accionDocente === 'function') {
       const maxTotal = acts.reduce((s, a) => s + Number(a.puntaje_max || 0), 0);
       const imgs = (r, alto) => fotosDe(r).filter(id => fotos[id]).map(id => `<img src="${fotos[id]}" style="max-height:${alto}px;max-width:32%;margin:2px 4px 2px 0;border-radius:4px">`).join('');
       let sec = 0;
+      const nSec = () => sec++;
       const filas = acts.map((a, i) => {
         const r = d.rs.find(x => x.actividad_id === a.id);
         const T = esRec(a) ? TIPOS.recorrido : (TIPOS[a.tipo] || TIPOS.desarrollo);
@@ -901,12 +1087,10 @@ if (typeof accionDocente === 'function') {
         if (!r) return '';
         return `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin-bottom:8px">
           <b>${esc(a.titulo)}</b> <span style="color:#64748b">(${esc((TIPOS[a.tipo] || TIPOS.desarrollo).nom)} · ${esc(a.puntaje_max)} pt)</span>
-          <p style="margin:5px 0;white-space:pre-line">${esc(respuestaTexto(a, r)) || '<i>(solo fotografía)</i>'}</p>${imgs(r, 150)}
+          <p style="margin:5px 0;white-space:pre-line">${esSinResp(r) ? '<i>Sin respuesta del estudiante (evaluada por el docente)</i>' : (esc(respuestaTexto(a, r)) || '<i>(solo fotografía)</i>')}</p>${imgs(r, 150)}
           <p style="margin:5px 0 0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) : 'Por evaluar'}${r.retro_docente ? ` · <b>Observación del docente:</b> ${esc(r.retro_docente)}` : ''}</p></div>`;
       }).join('');
       const recs = d.rs.map(r => ({ r, a: actPor(r.actividad_id) })).filter(x => esRec(x.a) && recDe(x.r));
-      const secRec = recs.length ? tituloPDF(sec++ + 0, '') && '' : '';
-      const nSec = () => sec++;
       let html = encabezadoPDF('Informe individual de salida a terreno', 'Resultados, recorridos y registro de actividades', logo);
       html += tituloPDF(nSec(), 'Identificación del estudiante') + `<table style="width:100%;border-collapse:collapse">
         <tr><td style="${TH};width:18%">Estudiante</td><td style="${TD}">${esc(d.est.nombre)}</td><td style="${TH};width:12%">RUT</td><td style="${TD}">${esc(d.est.rut)}</td></tr>
@@ -1006,9 +1190,10 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-accion]');
   if (!b) return;
   const a = b.dataset.accion, id = b.dataset.id;
-  if (a.indexOf('rec-') !== 0) return;
+  if (a !== 'ver-trayecto' && a.indexOf('rec-') !== 0) return;
   try {
     switch (a) {
+      case 'ver-trayecto': return await verTrayecto();
       case 'rec-iniciar': return await iniciarRec();
       case 'rec-terminar': return await terminarRec();
       case 'rec-cerrar':
