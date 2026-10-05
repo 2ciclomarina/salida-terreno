@@ -1,9 +1,12 @@
 'use strict';
 /* =========================================================
    SALIDA A TERRENO – Complementos (Parte 1)
-   Carta editable · Ficha del lugar · Condiciones del lugar · Distancia por camino
+   Carta editable · Presentación del lugar (inicio) · Ficha de cada lugar
+   Condiciones del lugar · Distancia por camino
    Se carga después de app.js (y de app-docente.js en el panel docente)
    ========================================================= */
+
+const INP = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
 
 /* ---------- Distancias ---------- */
 function distM(a, b) {
@@ -102,14 +105,14 @@ iniciarFirma = function () {
   if (sp) sp.textContent = c.aceptacion;
 };
 
-/* ---------- Ficha del lugar (vista del estudiante) ---------- */
+/* ---------- Ficha de cada lugar (vista del estudiante) ---------- */
 function fichaTiene(p) {
   const f = jsonSeguro(p.ficha, null);
   return !!(f && ((f.historia || '').trim() || (f.elementos || []).length));
 }
 function tarjetaElemento(e) {
   return `<div class="rounded-2xl bg-white border overflow-hidden">
-    ${e.imagen_id ? `<img data-archivo="${esc(e.imagen_id)}" class="w-full h-36 object-cover bg-slate-100" alt="${esc(e.titulo)}">` : ''}
+    ${e.imagen_id ? `<img data-archivo="${esc(e.imagen_id)}" data-zoom="1" class="w-full h-36 object-cover bg-slate-100" alt="${esc(e.titulo)}">` : ''}
     <div class="p-2"><div class="font-semibold text-sm">${esc(e.titulo)}</div>
     ${e.texto ? `<div class="text-xs text-slate-600 whitespace-pre-line">${esc(e.texto)}</div>` : ''}</div></div>`;
 }
@@ -131,7 +134,7 @@ function abrirFicha(id) {
   pintarImagenes($('#modal-cuerpo'));
 }
 
-// Encabezado de cada lugar: ahora con el botón «Conocer el lugar»
+// Encabezado de cada lugar: con el botón «Conocer el lugar»
 cabeceraPunto = function (g) {
   const todas = S.datos.actividades.filter(a => a.punto_id === g.punto.id);
   const hechas = todas.filter(a => respuestaDe(a)).length;
@@ -151,11 +154,97 @@ cabeceraPunto = function (g) {
     </div></div>`;
 };
 
-// Las imágenes de las fichas también se guardan en el teléfono para verlas sin internet
+/* ---------- Presentación del lugar (inicio de la aplicación) ---------- */
+const INI_IC = { historia: '🏛️', flora: '🌿', fauna: '🦅', relieve: '⛰️', poblacion: '👥', otra: '📌' };
+const INI_DEF = { historia: 'Historia', flora: 'Flora', fauna: 'Fauna', relieve: 'Relieve', poblacion: 'Población', otra: 'Información' };
+
+function seccionTiene(s) {
+  const p = s.poblacion || {};
+  return !!((s.texto || '').trim() || (s.imagenes || []).length || p.total || p.actividades);
+}
+function inicioTiene(i) {
+  return !!i && !!(i.portada || (i.intro || '').trim() || (i.secciones || []).some(seccionTiene));
+}
+function seccionHTML(s) {
+  const p = s.poblacion || {};
+  return `<section class="rounded-2xl border border-slate-200 p-3 space-y-2">
+    <h4 class="font-bold">${INI_IC[s.tipo] || '📌'} ${esc(s.titulo || INI_DEF[s.tipo] || 'Información')}</h4>
+    ${s.tipo === 'poblacion' && (p.total || p.actividades) ? `<div class="rounded-xl bg-emerald-50 p-2 text-sm">
+      ${p.total ? `<div>👥 <b>Total de habitantes:</b> ${esc(p.total)}</div>` : ''}
+      ${p.actividades ? `<div class="mt-1"><b>Actividades:</b> <span class="whitespace-pre-line">${esc(p.actividades)}</span></div>` : ''}</div>` : ''}
+    ${s.texto ? `<p class="text-sm whitespace-pre-line">${esc(s.texto)}</p>` : ''}
+    ${(s.imagenes || []).length ? `<div class="grid grid-cols-2 gap-2">${s.imagenes.map(im => `<figure>
+      <img data-archivo="${esc(im.id)}" data-zoom="1" class="w-full h-32 object-cover rounded-xl bg-slate-100" alt="${esc(im.pie || s.titulo || '')}">
+      ${im.pie ? `<figcaption class="text-[11px] text-slate-500 mt-0.5">${esc(im.pie)}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}
+  </section>`;
+}
+function abrirInicio() {
+  const ini = S.datos && S.datos.inicio;
+  if (!inicioTiene(ini)) return;
+  modal(`<div class="space-y-3 pt-2">
+    ${ini.portada ? `<img data-archivo="${esc(ini.portada)}" data-zoom="1" class="w-full max-h-72 object-cover rounded-2xl bg-slate-100" alt="Portada">` : ''}
+    <h3 class="text-xl font-extrabold pr-6 leading-tight">📖 ${esc(ini.titulo || 'Conozca el lugar de la salida')}</h3>
+    ${ini.intro ? `<div class="bg-slate-50 rounded-2xl p-3 text-sm whitespace-pre-line">${esc(ini.intro)}</div>` : ''}
+    ${(ini.secciones || []).filter(seccionTiene).map(seccionHTML).join('')}
+    <p class="text-xs text-slate-400">Toque una imagen para verla más grande.</p></div>`);
+  pintarImagenes($('#modal-cuerpo'));
+}
+function tarjetaInicio(ini) {
+  return `<div class="mt-4 rounded-3xl bg-white shadow overflow-hidden">
+    ${ini.portada ? `<img data-archivo="${esc(ini.portada)}" data-zoom="1" class="w-full max-h-64 object-cover bg-slate-100" alt="Portada">` : ''}
+    <div class="p-4"><div class="font-extrabold">📖 ${esc(ini.titulo || 'Conozca el lugar de la salida')}</div>
+      ${ini.intro ? `<p class="text-sm text-slate-600 whitespace-pre-line mt-1 line-clamp-3">${esc(ini.intro)}</p>` : ''}
+      <button data-accion="ver-inicio" class="mt-3 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-2xl">📖 Ver información del lugar</button></div></div>`;
+}
+// Se abre sola la primera vez (y cada vez que el docente la modifica)
+function autoAbrirInicio(ini) {
+  try {
+    const k = 'inicio_visto_' + S.usuario.key;
+    if (localStorage.getItem(k) === String(ini.act)) return;
+    if (!$('#modal').classList.contains('hidden') || $('#pantalla-estudiante').classList.contains('hidden')) return;
+    localStorage.setItem(k, String(ini.act));
+    abrirInicio();
+  } catch (_) { /* si no se puede recordar, simplemente no se abre sola */ }
+}
+const _renderEstudianteIni = renderEstudiante;
+renderEstudiante = function () {
+  _renderEstudianteIni();
+  const ini = S.datos && S.datos.inicio;
+  if (!inicioTiene(ini)) return;
+  $('#est-info').insertAdjacentHTML('beforeend', tarjetaInicio(ini));
+  pintarImagenes($('#est-info'));
+  autoAbrirInicio(ini);
+};
+
+// Ampliar una imagen al tocarla
+document.addEventListener('click', e => {
+  const im = e.target.closest('img[data-zoom]');
+  if (!im || !im.src) return;
+  let lb = $('#lightbox');
+  if (!lb) {
+    lb = document.createElement('div');
+    lb.id = 'lightbox';
+    lb.className = 'fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-3';
+    lb.innerHTML = '<img class="max-w-full max-h-full rounded-xl" alt="Imagen ampliada">';
+    lb.onclick = () => lb.classList.add('hidden');
+    document.body.appendChild(lb);
+  }
+  $('img', lb).src = im.src;
+  lb.classList.remove('hidden');
+});
+
+// Las imágenes (presentación y fichas) también se guardan en el teléfono para verlas sin internet
 const _precargarImagenes = precargarImagenes;
 precargarImagenes = function () {
   _precargarImagenes();
-  (S.datos.puntos || []).forEach(p => ((jsonSeguro(p.ficha, {}) || {}).elementos || []).forEach(e => { if (e.imagen_id) dataUrlArchivo(e.imagen_id).catch(() => {}); }));
+  const ids = [];
+  (S.datos.puntos || []).forEach(p => ((jsonSeguro(p.ficha, {}) || {}).elementos || []).forEach(e => { if (e.imagen_id) ids.push(e.imagen_id); }));
+  const ini = S.datos.inicio;
+  if (ini) {
+    if (ini.portada) ids.push(ini.portada);
+    (ini.secciones || []).forEach(s => (s.imagenes || []).forEach(im => ids.push(im.id)));
+  }
+  (async () => { for (const id of ids) await dataUrlArchivo(id).catch(() => {}); })();
 };
 
 /* ---------- Mapa del estudiante: condiciones y distancias por camino ---------- */
@@ -251,20 +340,318 @@ abrirResponder = async function (id) {
 };
 
 /* =========================================================
-   PANEL DOCENTE
+   EDITORES DEL DOCENTE (se definen aquí, a la vista de todo el código)
+   ========================================================= */
+const CARTA_ITEMS_BASE = [
+  'Usted permanecerá siempre con su grupo y bajo la supervisión de los docentes a cargo.',
+  'Seguirá las indicaciones de seguridad y no se alejará de las zonas autorizadas.',
+  'Cuidará el entorno natural y no dejará residuos.',
+  'Respetará a sus compañeros, a los docentes y a las personas del lugar.',
+  'Usará el teléfono solo para las actividades de la salida.',
+  'Responderá cada actividad dentro del horario indicado, con honestidad y con su propio trabajo.',
+  'Autoriza que la aplicación registre su ubicación y las fotografías que usted tome al responder.'
+];
+
+/* --- Carta de compromiso --- */
+function formCarta() {
+  const c = S.panel.carta || {};
+  let items = (c.items && c.items.length ? c.items : CARTA_ITEMS_BASE).slice();
+  modal(`<form id="f-carta" class="space-y-3 pt-2">
+    <h3 class="text-lg font-extrabold pr-6">📜 Carta de compromiso</h3>
+    <p class="text-xs text-slate-500">Esto es lo que verán y firmarán los estudiantes. Escriba un compromiso en cada recuadro.</p>
+    <label class="block text-sm font-semibold">Título<input name="titulo" class="${INP} mt-1" value="${esc(c.titulo || '')}"></label>
+    <label class="block text-sm font-semibold">Texto de presentación<textarea name="intro" rows="2" class="${INP} mt-1">${esc(c.intro || '')}</textarea></label>
+    <div class="text-sm font-semibold">Compromisos</div>
+    <div id="ca-lista" class="space-y-2"></div>
+    <button type="button" id="ca-mas" class="text-sm font-semibold text-indigo-700">+ Agregar compromiso</button>
+    <label class="block text-sm font-semibold">Frase para aceptar<input name="acepta" class="${INP} mt-1" value="${esc(c.aceptacion || '')}"></label>
+    <label class="flex items-start gap-2 text-sm bg-amber-50 rounded-xl p-2"><input type="checkbox" name="nueva" class="mt-1">
+      <span>Exigir que <b>todos</b> los estudiantes firmen de nuevo con este texto (la próxima vez que ingresen).</span></label>
+    <div class="flex gap-2"><button type="button" id="ca-reset" class="px-3 py-2 rounded-xl bg-slate-100 text-sm">Restablecer texto original</button>
+      <button class="flex-1 bg-teal-700 text-white font-bold py-2.5 rounded-xl">Guardar carta</button></div>
+  </form>`);
+  const f = $('#f-carta');
+  const pintar = () => {
+    $('#ca-lista').innerHTML = items.map((t, i) => `<div class="flex items-start gap-1">
+      <span class="h-6 w-6 mt-2 shrink-0 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center">${i + 1}</span>
+      <textarea data-ci="${i}" rows="2" class="${INP} flex-1">${esc(t)}</textarea>
+      <div class="flex flex-col text-lg leading-none">
+        <button type="button" data-cm="${i}:-1" class="px-1 text-slate-500" aria-label="Subir">↑</button>
+        <button type="button" data-cm="${i}:1" class="px-1 text-slate-500" aria-label="Bajar">↓</button>
+        <button type="button" data-cd="${i}" class="px-1 text-rose-500" aria-label="Quitar">×</button></div></div>`).join('');
+  };
+  pintar();
+  f.addEventListener('input', ev => { if (ev.target.dataset.ci !== undefined) items[+ev.target.dataset.ci] = ev.target.value; });
+  f.addEventListener('click', ev => {
+    const T = ev.target;
+    if (T.id === 'ca-mas') { if (items.length < 25) { items.push(''); pintar(); } return; }
+    if (T.id === 'ca-reset') { items = CARTA_ITEMS_BASE.slice(); pintar(); return; }
+    const m = T.closest('[data-cm]');
+    if (m) {
+      const [i, d] = m.dataset.cm.split(':').map(Number), j = i + d;
+      if (j >= 0 && j < items.length) { [items[i], items[j]] = [items[j], items[i]]; pintar(); }
+      return;
+    }
+    const dl = T.closest('[data-cd]');
+    if (dl) { items.splice(+dl.dataset.cd, 1); pintar(); }
+  });
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const lim = items.map(s => s.trim()).filter(Boolean);
+    if (!lim.length) return aviso('Escriba al menos un compromiso.', 'error');
+    cargando(true, 'Guardando la carta…');
+    try {
+      const d = await api('guardarCarta', {
+        carta: { titulo: f.titulo.value, intro: f.intro.value, items: lim, aceptacion: f.acepta.value },
+        exigirNuevaFirma: f.nueva.checked
+      });
+      S.panel.carta = d.carta;
+      cerrarModal(); redibujar();
+      aviso(f.nueva.checked ? 'Carta guardada. Todos deberán firmar de nuevo.' : 'Carta guardada.');
+    } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
+  };
+}
+
+/* --- Ficha de un lugar --- */
+function formFicha(id) {
+  const p = S.panel.puntos.find(x => x.id === id);
+  if (!p) return;
+  const f0 = jsonSeguro(p.ficha, {}) || {};
+  const els = (f0.elementos || []).map(e => ({ tipo: e.tipo || 'otro', titulo: e.titulo || '', texto: e.texto || '', imagen_id: e.imagen_id || '', file: null, prev: '' }));
+  const TF = [['historia', '🏛️ Historia'], ['flora', '🌿 Flora'], ['fauna', '🦅 Fauna'], ['otro', '📌 Otro']];
+  modal(`<form id="f-ficha" class="space-y-3 pt-2">
+    <h3 class="text-lg font-extrabold pr-6">📖 Ficha del lugar: ${esc(p.nombre)}</h3>
+    <p class="text-xs text-slate-500">Los estudiantes la verán con el botón «Conocer el lugar». Cuente la historia y agregue flora, fauna u otros elementos con su fotografía, para que sea más fácil reconocerlos en terreno.</p>
+    <label class="block text-sm font-semibold">Descripción e historia del lugar
+      <textarea name="historia" rows="5" class="${INP} mt-1" placeholder="Qué es el lugar, su historia, por qué es importante…">${esc(f0.historia || '')}</textarea></label>
+    <div class="text-sm font-semibold">Elementos para reconocer</div>
+    <div id="fi-lista" class="space-y-3"></div>
+    <div class="flex flex-wrap gap-2">${TF.map(([k, t]) => `<button type="button" data-fadd="${k}" class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-semibold">+ ${t}</button>`).join('')}</div>
+    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar ficha</button>
+  </form>`);
+  const f = $('#f-ficha');
+  const pintar = () => {
+    $('#fi-lista').innerHTML = els.length ? els.map((e, i) => {
+      const img = e.prev ? `<img src="${e.prev}" class="w-full max-h-40 object-cover rounded-xl">`
+        : e.imagen_id ? `<img data-archivo="${esc(e.imagen_id)}" class="w-full max-h-40 object-cover rounded-xl bg-slate-100">` : '';
+      return `<div class="rounded-2xl border-2 border-emerald-100 bg-emerald-50/40 p-3 space-y-2">
+        <div class="flex gap-2 items-center">
+          <select data-fk="tipo" data-fi="${i}" class="${INP} flex-1">${TF.map(([k, t]) => `<option value="${k}" ${e.tipo === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <button type="button" data-fdel="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button></div>
+        <input data-fk="titulo" data-fi="${i}" value="${esc(e.titulo)}" placeholder="Nombre (ej: Peumo, Zorro culpeo, Faro)" class="${INP}">
+        <textarea data-fk="texto" data-fi="${i}" rows="3" class="${INP}" placeholder="Cómo reconocerlo, dónde se ve, un dato interesante…">${esc(e.texto)}</textarea>
+        ${img}
+        <label class="inline-block text-xs bg-white border rounded-full px-3 py-1.5 font-semibold text-emerald-700 cursor-pointer">📷 ${img ? 'Cambiar' : 'Agregar'} fotografía
+          <input type="file" accept="image/*" data-ff="${i}" class="hidden"></label></div>`;
+    }).join('') : '<p class="text-xs text-slate-500">Aún no hay elementos. Agregue flora, fauna o hechos históricos con su fotografía.</p>';
+    pintarImagenes($('#fi-lista'));
+  };
+  pintar();
+  f.addEventListener('input', ev => {
+    const t = ev.target;
+    if (t.dataset.fk && t.dataset.fk !== 'tipo') els[+t.dataset.fi][t.dataset.fk] = t.value;
+  });
+  f.addEventListener('change', ev => {
+    const t = ev.target;
+    if (t.dataset.fk === 'tipo') els[+t.dataset.fi].tipo = t.value;
+    if (t.dataset.ff !== undefined && t.files[0]) {
+      const e = els[+t.dataset.ff];
+      e.file = t.files[0]; e.prev = URL.createObjectURL(t.files[0]);
+      pintar();
+    }
+  });
+  f.addEventListener('click', ev => {
+    const ad = ev.target.closest('[data-fadd]');
+    if (ad) {
+      if (els.length >= 20) return aviso('Puede agregar hasta 20 elementos por lugar.', 'error');
+      els.push({ tipo: ad.dataset.fadd, titulo: '', texto: '', imagen_id: '', file: null, prev: '' });
+      return pintar();
+    }
+    const dl = ev.target.closest('[data-fdel]');
+    if (dl) { els.splice(+dl.dataset.fdel, 1); pintar(); }
+  });
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    cargando(true, 'Guardando la ficha…');
+    try {
+      const out = [];
+      for (const e of els) {
+        const o = { tipo: e.tipo, titulo: e.titulo.trim(), texto: e.texto.trim(), imagen_id: e.imagen_id };
+        if (e.file) o.imagenB64 = await comprimirImagen(e.file, 300);
+        out.push(o);
+      }
+      const d = await api('guardarFicha', { punto_id: id, ficha: { historia: f.historia.value.trim(), elementos: out } });
+      p.ficha = d.ficha;
+      cerrarModal(); redibujar();
+      aviso('Ficha guardada.');
+    } catch (err) { aviso(err.message, 'error'); } finally { cargando(false); }
+  };
+}
+
+/* --- Presentación del lugar (lo primero que ven los estudiantes) --- */
+function formInicio() {
+  const ini0 = (S.panel && S.panel.inicio) || {};
+  const BASE = ['historia', 'flora', 'fauna', 'relieve', 'poblacion'];
+  const mapImgs = l => (l || []).map(im => ({ id: im.id, pie: im.pie || '', file: null, prev: '' }));
+  const nueva = (tipo, s) => ({
+    tipo, titulo: s.titulo || '', texto: s.texto || '',
+    poblacion: { total: (s.poblacion || {}).total || '', actividades: (s.poblacion || {}).actividades || '' },
+    imagenes: mapImgs(s.imagenes)
+  });
+  const secs = BASE.map(t => nueva(t, (ini0.secciones || []).find(x => x.tipo === t) || {}))
+    .concat((ini0.secciones || []).filter(s => s.tipo === 'otra').map(s => nueva('otra', s)));
+  const portada = { id: ini0.portada || '', file: null, prev: '' };
+
+  modal(`<form id="f-inicio" class="space-y-3 pt-2">
+    <h3 class="text-lg font-extrabold pr-6">📖 Presentación del lugar</h3>
+    <p class="text-xs text-slate-500">Es lo primero que verán los estudiantes: se abre sola la primera vez que ingresan y queda en su pantalla de inicio. Complete solo lo que quiera; las secciones vacías no se muestran. Puede agregar todas las imágenes que desee.</p>
+    <label class="block text-sm font-semibold">Título<input name="titulo" class="${INP} mt-1" placeholder="Ej: Conozca Coliumo" value="${esc(ini0.titulo || '')}"></label>
+    <label class="block text-sm font-semibold">Texto de bienvenida
+      <textarea name="intro" rows="3" class="${INP} mt-1" placeholder="Una breve presentación de la salida y del lugar que visitarán">${esc(ini0.intro || '')}</textarea></label>
+    <div class="rounded-2xl border-2 border-emerald-100 bg-emerald-50/40 p-3 space-y-2">
+      <div class="text-sm font-semibold">🖼️ Imagen de portada (la que se ve primero)</div>
+      <div id="fi-portada"></div>
+      <label class="inline-block text-xs bg-white border rounded-full px-3 py-1.5 font-semibold text-emerald-700 cursor-pointer">📷 Elegir imagen
+        <input type="file" accept="image/*" id="fi-portada-file" class="hidden"></label>
+      <button type="button" id="fi-portada-quitar" class="text-xs text-rose-600 underline ml-2">Quitar</button>
+    </div>
+    <div id="fi-secs" class="space-y-2"></div>
+    <button type="button" id="fi-otra" class="text-sm font-semibold text-indigo-700">+ Agregar otra sección</button>
+    <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar presentación</button>
+  </form>`);
+
+  const f = $('#f-inicio');
+  const pintarPortada = () => {
+    $('#fi-portada').innerHTML = portada.prev ? `<img src="${portada.prev}" class="w-full max-h-48 object-cover rounded-xl">`
+      : portada.id ? `<img data-archivo="${esc(portada.id)}" class="w-full max-h-48 object-cover rounded-xl bg-slate-100">`
+      : '<p class="text-xs text-slate-500">Sin imagen de portada.</p>';
+    pintarImagenes($('#fi-portada'));
+  };
+  const pintarImgs = i => {
+    $('#sim-' + i).innerHTML = secs[i].imagenes.map((im, j) => `<div class="flex gap-2 items-start rounded-xl border p-2 bg-slate-50">
+      ${im.prev ? `<img src="${im.prev}" class="h-20 w-20 object-cover rounded-lg shrink-0">` : `<img data-archivo="${esc(im.id)}" class="h-20 w-20 object-cover rounded-lg bg-slate-100 shrink-0">`}
+      <input data-sf="pie" data-si="${i}" data-sj="${j}" value="${esc(im.pie)}" placeholder="Descripción de la imagen (opcional)" class="${INP} flex-1">
+      <button type="button" data-sdel="${i}:${j}" class="text-rose-500 text-xl px-1" aria-label="Quitar imagen">×</button></div>`).join('');
+    pintarImagenes($('#sim-' + i));
+  };
+  const htmlSec = (s, i) => {
+    const t = s.tipo;
+    return `<details class="rounded-2xl border bg-white" data-sec="${i}"><summary class="cursor-pointer px-3 py-2.5 font-bold">${INI_IC[t]} ${esc(s.titulo || INI_DEF[t])}</summary>
+      <div class="p-3 space-y-2 border-t">
+        <input data-sf="titulo" data-si="${i}" value="${esc(s.titulo)}" placeholder="${t === 'otra' ? 'Título de esta sección' : 'Título (opcional, por defecto «' + INI_DEF[t] + '»)'}" class="${INP}">
+        ${t === 'poblacion' ? `<div class="grid grid-cols-1 gap-2">
+          <input data-sf="total" data-si="${i}" value="${esc(s.poblacion.total)}" placeholder="Total de habitantes (ej: 3.200 personas, según el Censo)" class="${INP}">
+          <textarea data-sf="acts" data-si="${i}" rows="2" class="${INP}" placeholder="Actividades de la población (ej: pesca artesanal, turismo, agricultura)">${esc(s.poblacion.actividades)}</textarea></div>` : ''}
+        <textarea data-sf="texto" data-si="${i}" rows="4" class="${INP}" placeholder="Escriba aquí la información de esta sección">${esc(s.texto)}</textarea>
+        <div id="sim-${i}" class="space-y-2"></div>
+        <div class="flex flex-wrap gap-3 items-center">
+          <label class="inline-block text-xs bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5 font-semibold text-emerald-700 cursor-pointer">📷 Agregar imágenes
+            <input type="file" accept="image/*" multiple data-sadd="${i}" class="hidden"></label>
+          ${t === 'otra' ? `<button type="button" data-ssec="${i}" class="text-xs text-rose-600 underline">Quitar esta sección</button>` : ''}</div>
+      </div></details>`;
+  };
+  const pintarSecs = abrirUltima => {
+    const abiertos = $$('#fi-secs details').map(d => d.open);
+    $('#fi-secs').innerHTML = secs.map(htmlSec).join('');
+    $$('#fi-secs details').forEach((d, i) => { d.open = abrirUltima ? i === secs.length - 1 : !!abiertos[i]; });
+    secs.forEach((_, i) => pintarImgs(i));
+  };
+  pintarPortada();
+  pintarSecs(false);
+
+  f.addEventListener('input', ev => {
+    const t = ev.target, k = t.dataset.sf;
+    if (!k) return;
+    const s = secs[+t.dataset.si];
+    if (k === 'pie') s.imagenes[+t.dataset.sj].pie = t.value;
+    else if (k === 'total') s.poblacion.total = t.value;
+    else if (k === 'acts') s.poblacion.actividades = t.value;
+    else s[k] = t.value;
+  });
+  f.addEventListener('change', ev => {
+    const t = ev.target;
+    if (t.id === 'fi-portada-file' && t.files[0]) {
+      portada.file = t.files[0]; portada.prev = URL.createObjectURL(t.files[0]);
+      pintarPortada();
+      t.value = '';
+    }
+    if (t.dataset.sadd !== undefined && t.files.length) {
+      const i = +t.dataset.sadd, s = secs[i];
+      Array.from(t.files).forEach(file => {
+        if (s.imagenes.length >= 30) return;
+        s.imagenes.push({ id: '', pie: '', file, prev: URL.createObjectURL(file) });
+      });
+      pintarImgs(i);
+      t.value = '';
+    }
+  });
+  f.addEventListener('click', ev => {
+    const T = ev.target;
+    if (T.id === 'fi-portada-quitar') { portada.id = ''; portada.file = null; portada.prev = ''; return pintarPortada(); }
+    if (T.id === 'fi-otra') {
+      if (secs.length >= 12) return aviso('Puede tener hasta 12 secciones.', 'error');
+      secs.push(nueva('otra', {})); return pintarSecs(true);
+    }
+    const di = T.closest('[data-sdel]');
+    if (di) { const [i, j] = di.dataset.sdel.split(':').map(Number); secs[i].imagenes.splice(j, 1); return pintarImgs(i); }
+    const ds = T.closest('[data-ssec]');
+    if (ds) { secs.splice(+ds.dataset.ssec, 1); pintarSecs(false); }
+  });
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    cargando(true, 'Guardando…');
+    try {
+      const pend = [];
+      if (portada.file) pend.push(portada);
+      secs.forEach(s => s.imagenes.forEach(im => { if (im.file) pend.push(im); }));
+      let n = 0;
+      for (const im of pend) {
+        cargando(true, `Subiendo imágenes (${++n}/${pend.length})…`);
+        const d = await api('subirImagen', { imagenB64: await comprimirImagen(im.file, 400) });
+        im.id = d.id; im.file = null;   // si falla algo después, no se vuelve a subir
+      }
+      cargando(true, 'Guardando la presentación…');
+      const d = await api('guardarPresentacion', {
+        inicio: {
+          titulo: f.titulo.value, intro: f.intro.value, portada: portada.id,
+          secciones: secs.map(s => ({ tipo: s.tipo, titulo: s.titulo, texto: s.texto, poblacion: s.poblacion,
+            imagenes: s.imagenes.filter(im => im.id).map(im => ({ id: im.id, pie: im.pie })) }))
+        }
+      });
+      S.panel.inicio = d.inicio;
+      cerrarModal(); redibujar();
+      aviso('Presentación guardada. Los estudiantes la verán al ingresar.');
+    } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
+  };
+}
+
+/* --- Puntaje completo a recorridos (lo usan los botones de recorrido) --- */
+async function aprobarRec(id, silencioso) {
+  const r = S.panel.respuestas.find(x => x.id === id), a = actPor(r.actividad_id);
+  const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(a.puntaje_max), retro: r.retro_docente || '', evaluacion: {} });
+  r.puntaje_final = d.puntaje_final; r.estado = 'evaluada';
+  if (!silencioso) { redibujar(); aviso('Puntaje guardado. El estudiante ya puede verlo.'); }
+}
+async function aprobarTodosRec() {
+  const f = S.filtroR;
+  const rs = S.panel.respuestas.filter(r => {
+    const a = actPor(r.actividad_id);
+    if (!esRec(a) || r.estado === 'evaluada' || (f.act && r.actividad_id !== f.act)) return false;
+    const fot = jsonSeguro(r.fotos, {});
+    return recDe(r) && hitosDe(a).every(h => fot[h.id]);
+  });
+  if (!rs.length) return aviso('No hay recorridos completos pendientes de evaluar.');
+  if (!confirm('Se dará el puntaje completo a ' + rs.length + ' recorrido(s) que tienen todas las fotografías. ¿Continuar?')) return;
+  let n = 0;
+  try { for (const r of rs) { cargando(true, `Evaluando (${++n}/${rs.length})…`); await aprobarRec(r.id, true); } }
+  finally { cargando(false); }
+  redibujar(); aviso(rs.length + ' recorrido(s) evaluados.');
+}
+
+/* =========================================================
+   PANEL DOCENTE: ajustes a las pantallas existentes
    ========================================================= */
 if (typeof accionDocente === 'function') {
-  const CARTA_ITEMS_BASE = [
-    'Usted permanecerá siempre con su grupo y bajo la supervisión de los docentes a cargo.',
-    'Seguirá las indicaciones de seguridad y no se alejará de las zonas autorizadas.',
-    'Cuidará el entorno natural y no dejará residuos.',
-    'Respetará a sus compañeros, a los docentes y a las personas del lugar.',
-    'Usará el teléfono solo para las actividades de la salida.',
-    'Responderá cada actividad dentro del horario indicado, con honestidad y con su propio trabajo.',
-    'Autoriza que la aplicación registre su ubicación y las fotografías que usted tome al responder.'
-  ];
-  const INP = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
-
   // Una firma vale solo si corresponde a la versión actual de la carta
   const _calcularEstudiantes = calcularEstudiantes;
   calcularEstudiantes = function () {
@@ -273,152 +660,26 @@ if (typeof accionDocente === 'function') {
     return r;
   };
 
-  /* --- Carta de compromiso: editor --- */
-  function formCarta() {
-    const c = S.panel.carta || {};
-    let items = (c.items && c.items.length ? c.items : CARTA_ITEMS_BASE).slice();
-    modal(`<form id="f-carta" class="space-y-3 pt-2">
-      <h3 class="text-lg font-extrabold pr-6">📜 Carta de compromiso</h3>
-      <p class="text-xs text-slate-500">Esto es lo que verán y firmarán los estudiantes. Escriba un compromiso en cada recuadro.</p>
-      <label class="block text-sm font-semibold">Título<input name="titulo" class="${INP} mt-1" value="${esc(c.titulo || '')}"></label>
-      <label class="block text-sm font-semibold">Texto de presentación<textarea name="intro" rows="2" class="${INP} mt-1">${esc(c.intro || '')}</textarea></label>
-      <div class="text-sm font-semibold">Compromisos</div>
-      <div id="ca-lista" class="space-y-2"></div>
-      <button type="button" id="ca-mas" class="text-sm font-semibold text-indigo-700">+ Agregar compromiso</button>
-      <label class="block text-sm font-semibold">Frase para aceptar<input name="acepta" class="${INP} mt-1" value="${esc(c.aceptacion || '')}"></label>
-      <label class="flex items-start gap-2 text-sm bg-amber-50 rounded-xl p-2"><input type="checkbox" name="nueva" class="mt-1">
-        <span>Exigir que <b>todos</b> los estudiantes firmen de nuevo con este texto (la próxima vez que ingresen).</span></label>
-      <div class="flex gap-2"><button type="button" id="ca-reset" class="px-3 py-2 rounded-xl bg-slate-100 text-sm">Restablecer texto original</button>
-        <button class="flex-1 bg-teal-700 text-white font-bold py-2.5 rounded-xl">Guardar carta</button></div>
-    </form>`);
-    const f = $('#f-carta');
-    const pintar = () => {
-      $('#ca-lista').innerHTML = items.map((t, i) => `<div class="flex items-start gap-1">
-        <span class="h-6 w-6 mt-2 shrink-0 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center">${i + 1}</span>
-        <textarea data-ci="${i}" rows="2" class="${INP} flex-1">${esc(t)}</textarea>
-        <div class="flex flex-col text-lg leading-none">
-          <button type="button" data-cm="${i}:-1" class="px-1 text-slate-500" aria-label="Subir">↑</button>
-          <button type="button" data-cm="${i}:1" class="px-1 text-slate-500" aria-label="Bajar">↓</button>
-          <button type="button" data-cd="${i}" class="px-1 text-rose-500" aria-label="Quitar">×</button></div></div>`).join('');
-    };
-    pintar();
-    f.addEventListener('input', ev => { if (ev.target.dataset.ci !== undefined) items[+ev.target.dataset.ci] = ev.target.value; });
-    f.addEventListener('click', ev => {
-      const T = ev.target;
-      if (T.id === 'ca-mas') { if (items.length < 25) { items.push(''); pintar(); } return; }
-      if (T.id === 'ca-reset') { items = CARTA_ITEMS_BASE.slice(); pintar(); return; }
-      const m = T.closest('[data-cm]');
-      if (m) {
-        const [i, d] = m.dataset.cm.split(':').map(Number), j = i + d;
-        if (j >= 0 && j < items.length) { [items[i], items[j]] = [items[j], items[i]]; pintar(); }
-        return;
-      }
-      const dl = T.closest('[data-cd]');
-      if (dl) { items.splice(+dl.dataset.cd, 1); pintar(); }
-    });
-    f.onsubmit = async ev => {
-      ev.preventDefault();
-      const lim = items.map(s => s.trim()).filter(Boolean);
-      if (!lim.length) return aviso('Escriba al menos un compromiso.', 'error');
-      cargando(true, 'Guardando la carta…');
-      try {
-        const d = await api('guardarCarta', {
-          carta: { titulo: f.titulo.value, intro: f.intro.value, items: lim, aceptacion: f.acepta.value },
-          exigirNuevaFirma: f.nueva.checked
-        });
-        S.panel.carta = d.carta;
-        cerrarModal(); redibujar();
-        aviso(f.nueva.checked ? 'Carta guardada. Todos deberán firmar de nuevo.' : 'Carta guardada.');
-      } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
-    };
-  }
+  const bloqueInicio = () => {
+    const i = S.panel.inicio;
+    const n = i ? (i.secciones || []).filter(seccionTiene).length : 0;
+    return `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2 mb-4">
+      <h3 class="font-bold">📖 Presentación del lugar (inicio de la aplicación)</h3>
+      <p class="text-sm text-slate-500">Lo primero que ven los estudiantes: imagen de portada, historia, flora, fauna, relieve, población y las secciones que usted agregue, con todas las imágenes que quiera.</p>
+      <p class="text-xs text-slate-500">${i && inicioTiene(i) ? 'Actualmente: ' + n + ' sección(es) con contenido' + (i.portada ? ' y portada' : '') + '.' : 'Aún no ha creado la presentación.'}</p>
+      <button data-accion="editar-inicio" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">✏️ ${i && inicioTiene(i) ? 'Editar' : 'Crear'} la presentación</button></div>`;
+  };
 
   const _renderAjustes = renderAjustes;
   renderAjustes = function () {
     _renderAjustes();
     const c = S.panel.carta || {};
-    $('#doc-contenido').insertAdjacentHTML('afterbegin', `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2 mb-4">
+    $('#doc-contenido').insertAdjacentHTML('afterbegin', bloqueInicio() + `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2 mb-4">
       <h3 class="font-bold">📜 Carta de compromiso</h3>
       <p class="text-sm text-slate-500">Es el texto que los estudiantes leen y firman al ingresar. Puede cambiarlo y agregar compromisos.</p>
       <p class="text-xs text-slate-500">Actualmente: «${esc(c.titulo || '')}» · ${(c.items || []).length} compromisos</p>
       <button data-accion="editar-carta" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">✏️ Editar la carta</button></div>`);
   };
-
-  /* --- Ficha del lugar: editor --- */
-  function formFicha(id) {
-    const p = S.panel.puntos.find(x => x.id === id);
-    if (!p) return;
-    const f0 = jsonSeguro(p.ficha, {}) || {};
-    const els = (f0.elementos || []).map(e => ({ tipo: e.tipo || 'otro', titulo: e.titulo || '', texto: e.texto || '', imagen_id: e.imagen_id || '', file: null, prev: '' }));
-    const TF = [['historia', '🏛️ Historia'], ['flora', '🌿 Flora'], ['fauna', '🦅 Fauna'], ['otro', '📌 Otro']];
-    modal(`<form id="f-ficha" class="space-y-3 pt-2">
-      <h3 class="text-lg font-extrabold pr-6">📖 Ficha del lugar: ${esc(p.nombre)}</h3>
-      <p class="text-xs text-slate-500">Los estudiantes la verán con el botón «Conocer el lugar». Cuente la historia y agregue flora, fauna u otros elementos con su fotografía, para que sea más fácil reconocerlos en terreno.</p>
-      <label class="block text-sm font-semibold">Descripción e historia del lugar
-        <textarea name="historia" rows="5" class="${INP} mt-1" placeholder="Qué es el lugar, su historia, por qué es importante…">${esc(f0.historia || '')}</textarea></label>
-      <div class="text-sm font-semibold">Elementos para reconocer</div>
-      <div id="fi-lista" class="space-y-3"></div>
-      <div class="flex flex-wrap gap-2">${TF.map(([k, t]) => `<button type="button" data-fadd="${k}" class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-semibold">+ ${t}</button>`).join('')}</div>
-      <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar ficha</button>
-    </form>`);
-    const f = $('#f-ficha');
-    const pintar = () => {
-      $('#fi-lista').innerHTML = els.length ? els.map((e, i) => {
-        const img = e.prev ? `<img src="${e.prev}" class="w-full max-h-40 object-cover rounded-xl">`
-          : e.imagen_id ? `<img data-archivo="${esc(e.imagen_id)}" class="w-full max-h-40 object-cover rounded-xl bg-slate-100">` : '';
-        return `<div class="rounded-2xl border-2 border-emerald-100 bg-emerald-50/40 p-3 space-y-2">
-          <div class="flex gap-2 items-center">
-            <select data-fk="tipo" data-fi="${i}" class="${INP} flex-1">${TF.map(([k, t]) => `<option value="${k}" ${e.tipo === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
-            <button type="button" data-fdel="${i}" class="text-rose-500 text-xl px-1" aria-label="Quitar">×</button></div>
-          <input data-fk="titulo" data-fi="${i}" value="${esc(e.titulo)}" placeholder="Nombre (ej: Peumo, Zorro culpeo, Faro)" class="${INP}">
-          <textarea data-fk="texto" data-fi="${i}" rows="3" class="${INP}" placeholder="Cómo reconocerlo, dónde se ve, un dato interesante…">${esc(e.texto)}</textarea>
-          ${img}
-          <label class="inline-block text-xs bg-white border rounded-full px-3 py-1.5 font-semibold text-emerald-700 cursor-pointer">📷 ${img ? 'Cambiar' : 'Agregar'} fotografía
-            <input type="file" accept="image/*" data-ff="${i}" class="hidden"></label></div>`;
-      }).join('') : '<p class="text-xs text-slate-500">Aún no hay elementos. Agregue flora, fauna o hechos históricos con su fotografía.</p>';
-      pintarImagenes($('#fi-lista'));
-    };
-    pintar();
-    f.addEventListener('input', ev => {
-      const t = ev.target;
-      if (t.dataset.fk && t.dataset.fk !== 'tipo') els[+t.dataset.fi][t.dataset.fk] = t.value;
-    });
-    f.addEventListener('change', ev => {
-      const t = ev.target;
-      if (t.dataset.fk === 'tipo') els[+t.dataset.fi].tipo = t.value;
-      if (t.dataset.ff !== undefined && t.files[0]) {
-        const e = els[+t.dataset.ff];
-        e.file = t.files[0]; e.prev = URL.createObjectURL(t.files[0]);
-        pintar();
-      }
-    });
-    f.addEventListener('click', ev => {
-      const ad = ev.target.closest('[data-fadd]');
-      if (ad) {
-        if (els.length >= 20) return aviso('Puede agregar hasta 20 elementos por lugar.', 'error');
-        els.push({ tipo: ad.dataset.fadd, titulo: '', texto: '', imagen_id: '', file: null, prev: '' });
-        return pintar();
-      }
-      const dl = ev.target.closest('[data-fdel]');
-      if (dl) { els.splice(+dl.dataset.fdel, 1); pintar(); }
-    });
-    f.onsubmit = async ev => {
-      ev.preventDefault();
-      cargando(true, 'Guardando la ficha…');
-      try {
-        const out = [];
-        for (const e of els) {
-          const o = { tipo: e.tipo, titulo: e.titulo.trim(), texto: e.texto.trim(), imagen_id: e.imagen_id };
-          if (e.file) o.imagenB64 = await comprimirImagen(e.file, 300);
-          out.push(o);
-        }
-        const d = await api('guardarFicha', { punto_id: id, ficha: { historia: f.historia.value.trim(), elementos: out } });
-        p.ficha = d.ficha;
-        cerrarModal(); redibujar();
-        aviso('Ficha guardada.');
-      } catch (err) { aviso(err.message, 'error'); } finally { cargando(false); }
-    };
-  }
 
   const _renderPuntos = renderPuntos;
   renderPuntos = function () {
@@ -427,6 +688,7 @@ if (typeof accionDocente === 'function') {
       const pt = S.panel.puntos.find(x => x.id === b.dataset.id);
       b.insertAdjacentHTML('beforebegin', `<button data-accion="editar-ficha" data-id="${esc(b.dataset.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-semibold">📖 Ficha${pt && fichaTiene(pt) ? ' ✔' : ''}</button>`);
     });
+    $('#doc-contenido').insertAdjacentHTML('afterbegin', bloqueInicio());
   };
 
   /* --- Respuestas: condiciones del momento --- */
@@ -450,8 +712,10 @@ document.addEventListener('click', async e => {
   const a = b.dataset.accion, id = b.dataset.id;
   try {
     if (a === 'ver-ficha') return abrirFicha(b.dataset.punto);
+    if (a === 'ver-inicio') return abrirInicio();
     if (a === 'clima-act') return await actualizarClimaCard();
-    if (typeof formFicha === 'function' && a === 'editar-ficha') return formFicha(id);
-    if (typeof formCarta === 'function' && a === 'editar-carta') return formCarta();
+    if (a === 'editar-ficha') return formFicha(id);
+    if (a === 'editar-carta') return formCarta();
+    if (a === 'editar-inicio') return formInicio();
   } catch (err) { cargando(false); aviso(err.message, 'error'); }
 });
