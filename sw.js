@@ -1,7 +1,7 @@
 /* Service Worker – Salida a Terreno */
-const VERSION = 'terreno-v7';
+const VERSION = 'terreno-v9';
 const TILES = VERSION + '-tiles';
-const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './manifest.json',
+const SHELL = ['./', './index.html', './docente.html', './app.js', './app-docente.js', './app-extra.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png', './favicon.png'];
 const CDN = [
   'https://cdn.tailwindcss.com',
@@ -74,9 +74,9 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const u = new URL(req.url);
-  // Ni la API de Apps Script ni el buscador de lugares se guardan en caché
+  // Estos servicios siempre deben consultarse en línea (no se guardan en caché)
   if (/(^|\.)script\.google(usercontent)?\.com$/.test(u.hostname)) return;
-  if (/nominatim\.openstreetmap\.org/.test(u.hostname)) return;
+  if (/nominatim\.openstreetmap\.org|api\.open-meteo\.com/.test(u.hostname)) return;
   if (/tile\.opentopomap\.org|tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname)) {
     return e.respondWith(tiles(req));
   }
