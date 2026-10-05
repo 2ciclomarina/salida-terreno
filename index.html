@@ -1,30 +1,33 @@
 <!DOCTYPE html>
+<!-- ARCHIVO: index.html (ALUMNOS) -->
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#312e81">
-  <title>Salida a Terreno – Panel docente</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23312e81'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%93%8B%3C/text%3E%3C/svg%3E">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Terreno">
+  <title>Salida a Terreno</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body{
-      background-color:#eef2ff;
+      background-color:#ecfeff;
       background-image:
-        radial-gradient(circle at 10% 8%,rgba(99,102,241,.30),transparent 42%),
-        radial-gradient(circle at 90% 15%,rgba(56,189,248,.25),transparent 46%),
-        radial-gradient(circle at 50% 100%,rgba(30,41,59,.18),transparent 52%),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='600' viewBox='0 0 600 600'%3E%3Cg fill='none' stroke='%23312e81' stroke-opacity='.10' stroke-width='1.6'%3E%3Cpath d='M-20 100C80 40 180 160 300 100S500 40 620 110'/%3E%3Cpath d='M-20 160C80 100 180 220 300 160S500 100 620 170'/%3E%3Cpath d='M-20 220C80 160 180 280 300 220S500 160 620 230'/%3E%3Cpath d='M-20 380C100 320 200 440 320 380S520 320 620 390'/%3E%3Cpath d='M-20 440C100 380 200 500 320 440S520 380 620 450'/%3E%3Cpath d='M-20 500C100 440 200 560 320 500S520 440 620 510'/%3E%3C/g%3E%3C/svg%3E");
+        radial-gradient(circle at 12% 8%,rgba(45,212,191,.38),transparent 42%),
+        radial-gradient(circle at 88% 18%,rgba(56,189,248,.32),transparent 46%),
+        radial-gradient(circle at 50% 100%,rgba(16,185,129,.28),transparent 52%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='600' viewBox='0 0 600 600'%3E%3Cg fill='none' stroke='%230f766e' stroke-opacity='.12' stroke-width='1.6'%3E%3Cpath d='M-20 100C80 40 180 160 300 100S500 40 620 110'/%3E%3Cpath d='M-20 160C80 100 180 220 300 160S500 100 620 170'/%3E%3Cpath d='M-20 220C80 160 180 280 300 220S500 160 620 230'/%3E%3Cpath d='M-20 380C100 320 200 440 320 380S520 320 620 390'/%3E%3Cpath d='M-20 440C100 380 200 500 320 440S520 380 620 450'/%3E%3Cpath d='M-20 500C100 440 200 560 320 500S520 440 620 510'/%3E%3C/g%3E%3C/svg%3E");
       background-attachment:fixed;
     }
-    .pin{width:28px;height:28px;border-radius:9999px;background:#3730a3;color:#fff;font-weight:700;font-size:13px;
+    .pin{width:28px;height:28px;border-radius:9999px;background:#0f766e;color:#fff;font-weight:700;font-size:13px;
          display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
-    .tab-activa{background:#3730a3;color:#fff}
-    .bg-teal-700{background-color:#3730a3 !important}
-    .bg-teal-800{background-color:#312e81 !important}
-    .text-teal-700{color:#3730a3 !important}
-    .bg-teal-50{background-color:#eef2ff !important}
+    #firma-canvas{touch-action:none}
+    .tab-activa{background:#0f766e;color:#fff}
   </style>
   <script>
     // Muestra errores de los archivos de la página (no los de imágenes que no cargan)
@@ -43,19 +46,17 @@
     });
   </script>
 </head>
-<body class="text-slate-800 min-h-screen" data-modo="docente">
+<body class="text-slate-800 min-h-screen" data-modo="alumno">
 
   <div id="error-js" onclick="this.classList.add('hidden')" class="hidden fixed top-0 inset-x-0 z-[60] bg-rose-700 text-white text-sm px-4 py-3 cursor-pointer"></div>
 
-  <header class="bg-gradient-to-r from-slate-900 to-indigo-800 text-white sticky top-0 z-30 shadow-lg">
+  <header class="bg-gradient-to-r from-teal-800 to-teal-600 text-white sticky top-0 z-30 shadow-lg">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
       <img id="logo" alt="Insignia del colegio" class="hidden h-11 w-11 object-contain bg-white rounded-full p-0.5">
-      <span id="icono-app" class="h-11 w-11 shrink-0 rounded-xl bg-white/15 flex items-center justify-center text-2xl">📋</span>
-      <h1 class="font-extrabold text-lg flex-1 leading-tight">Panel docente
-        <span class="block text-xs font-normal opacity-90">Prof. Cristian Yáñez Reyes · Salida a Terreno</span>
-      </h1>
+      <span id="icono-app" class="h-11 w-11 shrink-0 rounded-xl bg-white/15 flex items-center justify-center text-2xl">🧭</span>
+      <h1 class="font-extrabold text-lg flex-1 leading-tight">Salida a Terreno</h1>
       <span id="estado-red" class="text-xs px-2 py-1 rounded-full bg-emerald-500">En línea</span>
-      <span id="cola-contador" class="hidden"></span>
+      <span id="cola-contador" class="hidden text-xs px-2 py-1 rounded-full bg-amber-400 text-slate-900"></span>
       <button id="btn-salir" class="hidden text-sm underline">Salir</button>
     </div>
   </header>
@@ -65,31 +66,51 @@
     <section id="pantalla-login" class="hidden max-w-md mx-auto">
       <div class="bg-white/90 backdrop-blur rounded-3xl shadow-xl p-6 space-y-5">
         <div class="text-center">
-          <div class="mx-auto h-20 w-20 rounded-full bg-gradient-to-br from-slate-800 to-indigo-600 flex items-center justify-center text-4xl shadow-lg">📋</div>
-          <h2 class="text-2xl font-extrabold mt-3">Acceso docente</h2>
-          <p class="text-indigo-800 font-semibold text-sm mt-1">Profesor Cristian Yáñez Reyes</p>
-          <p class="text-slate-500 text-sm">Ingrese su contraseña para administrar la salida a terreno.</p>
+          <img src="icon-192.png" alt="Colegio Marina de Chile – Salida a Terreno" class="mx-auto h-32 w-32 object-contain">
+          <h2 class="text-2xl font-extrabold mt-2">Bienvenido(a)</h2>
+          <p class="text-slate-500 text-sm">Ingrese su RUT para comenzar su salida a terreno.</p>
         </div>
-        <form id="form-docente" class="space-y-3">
-          <label class="block text-sm font-medium">Contraseña
-            <input id="inp-clave" type="password" autocomplete="current-password"
+        <form id="form-estudiante" class="space-y-3">
+          <label class="block text-sm font-medium">Su RUT
+            <input id="inp-rut" inputmode="text" autocomplete="off" placeholder="12.345.678-9"
                    class="mt-1 w-full border rounded-xl px-4 py-3 text-lg">
           </label>
-          <button class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl shadow">Ingresar al panel</button>
+          <button class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-xl shadow">Ingresar</button>
+          <p class="text-xs text-slate-500 text-center">La primera vez necesita conexión a internet.</p>
         </form>
       </div>
     </section>
 
-    <section id="pantalla-docente" class="hidden space-y-4">
-      <div class="bg-white/95 rounded-2xl shadow p-4 flex items-center gap-3">
-        <span class="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl">👤</span>
+    <section id="pantalla-carta" class="hidden">
+      <div class="bg-white/95 rounded-3xl shadow-xl p-6 space-y-4">
+        <h2 class="text-xl font-extrabold">📜 Carta de compromiso</h2>
+        <p class="text-sm text-slate-600">Antes de comenzar, lea con atención el reglamento de la salida a terreno.</p>
+        <ol class="list-decimal pl-5 space-y-2 text-sm">
+          <li>Usted permanecerá siempre con su grupo y bajo la supervisión de los docentes a cargo.</li>
+          <li>Seguirá las indicaciones de seguridad y no se alejará de las zonas autorizadas.</li>
+          <li>Cuidará el entorno natural y no dejará residuos.</li>
+          <li>Respetará a sus compañeros, a los docentes y a las personas del lugar.</li>
+          <li>Usará el teléfono solo para las actividades de la salida.</li>
+          <li>Responderá cada actividad dentro del horario indicado, con honestidad y con su propio trabajo.</li>
+          <li>Autoriza que la aplicación registre su ubicación y las fotografías que usted tome al responder.</li>
+        </ol>
         <div>
-          <div class="font-bold leading-tight">Bienvenido, Prof. Cristian Yáñez Reyes</div>
-          <div class="text-xs text-slate-500">Administración de la salida a terreno</div>
+          <p class="text-sm font-medium mb-1">Firme con el dedo en el recuadro:</p>
+          <canvas id="firma-canvas" class="w-full h-40 border-2 border-dashed rounded-xl bg-slate-50"></canvas>
+          <button id="firma-limpiar" type="button" class="text-sm text-slate-600 underline mt-1">Borrar firma</button>
         </div>
+        <label class="flex items-start gap-2 text-sm">
+          <input id="chk-acepto" type="checkbox" class="mt-1">
+          <span>He leído el reglamento y me comprometo a cumplirlo.</span>
+        </label>
+        <button id="btn-acepto" class="w-full bg-teal-700 text-white font-bold py-3 rounded-xl disabled:opacity-40" disabled>Acepto</button>
       </div>
-      <nav id="doc-tabs" class="flex gap-1 overflow-x-auto bg-white/95 rounded-2xl shadow p-1 text-sm font-semibold"></nav>
-      <div id="doc-contenido"></div>
+    </section>
+
+    <section id="pantalla-estudiante" class="hidden space-y-4">
+      <div id="est-info"></div>
+      <nav id="est-tabs" class="grid grid-cols-4 gap-1 bg-white/95 rounded-2xl shadow p-1 text-xs font-semibold"></nav>
+      <div id="est-contenido" class="space-y-3"></div>
     </section>
   </main>
 
@@ -102,17 +123,14 @@
 
   <div id="cargando" class="hidden fixed inset-0 z-50 bg-white/70 flex items-center justify-center">
     <div class="bg-white shadow-xl rounded-2xl px-6 py-4 flex items-center gap-3">
-      <div class="h-5 w-5 rounded-full border-4 border-indigo-800 border-t-transparent animate-spin"></div>
+      <div class="h-5 w-5 rounded-full border-4 border-teal-700 border-t-transparent animate-spin"></div>
       <span id="cargando-msg" class="text-sm font-medium">Cargando…</span>
     </div>
   </div>
   <div id="aviso" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-[92vw] px-4 py-3 rounded-xl text-white text-sm shadow-lg"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="app.js?v=5"></script>
-  <script src="app-docente.js?v=5"></script>
   <script src="app-extra.js?v=2"></script>
 </body>
 </html>
