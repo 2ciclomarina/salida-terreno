@@ -827,4 +827,205 @@ if (typeof accionDocente === 'function') {
   renderRespuestas = function () {
     _renderRespuestasRec();
     const b = $('#doc-contenido [data-accion="ia-todas"]');
-    if (b) b.insertAdjacentHTML('beforebegin', '<button data-accion="rec-aprobar-todos"
+    if (b) b.insertAdjacentHTML('beforebegin', '<button data-accion="rec-aprobar-todos" class="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">✔ Aprobar recorridos completos</button>');
+  };
+  // La IA no evalúa recorridos
+  iaTodas = async function () {
+    const f = S.filtroR;
+    const rs = S.panel.respuestas.filter(r => {
+      const a = actPor(r.actividad_id);
+      return a && !esRec(a) && hayParteManual(a) && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
+    });
+    if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
+    let n = 0;
+    for (const r of rs) {
+      n++;
+      if (n > 1) await new Promise(res => setTimeout(res, 2500));
+      cargando(true, `Consultando a la IA (${n}/${rs.length})…`);
+      try { await iaUna(r.id, true); } catch (e) { aviso(e.message, 'error'); break; }
+    }
+    cargando(false); redibujar();
+  };
+
+  /* --- Resumen del curso --- */
+  const _renderResumenRec = renderResumen;
+  renderResumen = function () {
+    _renderResumenRec();
+    const est = calcularEstudiantes(), T = totalesRec(est);
+    const kpi = (t, v) => `<div class="rounded-xl bg-emerald-50 p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
+    const filas = est.filter(e => e.rec.n).map(e => `<tr class="border-t"><td class="py-1.5">${esc(e.est.nombre)}</td><td>${e.rec.n}</td><td>${fmtKm(e.rec.dist)}</td><td>${fmtDur(e.rec.mov)}</td><td>+${Math.round(e.rec.sub)} m</td><td>≈ ${Math.round(e.rec.kcal)}</td></tr>`).join('');
+    $('#doc-contenido').insertAdjacentHTML('beforeend', `<div class="bg-white/95 rounded-2xl shadow p-4 mt-4 overflow-x-auto"><h3 class="font-bold mb-2">🥾 Recorridos del curso</h3>` +
+      (T.n ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">${kpi('Recorridos', T.n)}${kpi('Distancia total', fmtKm(T.dist))}${kpi('Subida acumulada', '+' + Math.round(T.sub) + ' m')}${kpi('Calorías (aprox.)', Math.round(T.kcal))}</div>
+        <table class="w-full text-sm"><thead><tr class="text-left text-slate-500"><th class="py-1">Estudiante</th><th>Recorridos</th><th>Distancia</th><th>En movimiento</th><th>Subida</th><th>kcal aprox.</th></tr></thead><tbody>${filas}</tbody></table>
+        <p class="text-xs text-slate-400 mt-2">Las calorías son un cálculo aproximado. Estos totales también quedan en los informes y en el CSV.</p>`
+        : '<p class="text-sm text-slate-500">Aún no hay recorridos registrados.</p>') + '</div>');
+  };
+
+  /* --- Informes formales (PDF) --- */
+  const TD = 'border:1px solid #94a3b8;padding:4px 6px;font-size:11px;vertical-align:top';
+  const TH = TD + ';background:#e2e8f0;font-weight:bold;text-align:left';
+  const nf = n => Number(n).toFixed(1).replace('.', ',');
+  const ROM = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+  const encabezadoPDF = (titulo, sub, logo) => `<table style="width:100%;border-collapse:collapse;border-bottom:3px solid #0f766e;margin-bottom:12px"><tr>
+    <td style="width:76px;padding-bottom:8px">${logo ? `<img src="${logo}" style="height:64px">` : ''}</td>
+    <td style="padding-bottom:8px"><div style="font-size:10px;letter-spacing:1.5px;color:#475569;text-transform:uppercase">${esc(COLEGIO)}</div>
+      <div style="font-size:19px;font-weight:bold;color:#0f172a">${titulo}</div><div style="font-size:11px;color:#475569">${sub}</div></td>
+    <td style="text-align:right;font-size:10px;color:#475569;vertical-align:top">Emitido el<br><b>${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })}</b></td></tr></table>`;
+  const tituloPDF = (n, t) => `<div style="font-size:13px;font-weight:bold;color:#fff;background:#0f766e;padding:4px 8px;margin:14px 0 6px;border-radius:3px">${ROM[n]}. ${t}</div>`;
+  const firmaPDF = () => `<div style="margin-top:38px;text-align:center"><div style="display:inline-block;min-width:240px;border-top:1px solid #111;padding-top:4px;font-size:11px"><b>${esc(DOCENTE_NOMBRE)}</b><br>Docente a cargo<br>${esc(COLEGIO)}</div></div>`;
+  const PDF_OPC = nombre => ({ margin: 12, filename: nombre, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: '.avoid' } });
+  const envoltura = c => `<div style="width:720px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;background:#fff">${c}</div>`;
+
+  reporteIndividual = async function (key) {
+    const d = calcularEstudiantes().find(x => x.key === key);
+    if (!d) return;
+    cargando(true, 'Generando el informe…');
+    try {
+      const logo = S.insignia || await cargarInsignia();
+      const acts = S.panel.actividades;
+      const fotos = {};
+      for (const r of d.rs) for (const fid of fotosDe(r)) fotos[fid] = await dataUrlArchivo(fid).catch(() => null);
+      const maxTotal = acts.reduce((s, a) => s + Number(a.puntaje_max || 0), 0);
+      const imgs = (r, alto) => fotosDe(r).filter(id => fotos[id]).map(id => `<img src="${fotos[id]}" style="max-height:${alto}px;max-width:32%;margin:2px 4px 2px 0;border-radius:4px">`).join('');
+      let sec = 0;
+      const filas = acts.map((a, i) => {
+        const r = d.rs.find(x => x.actividad_id === a.id);
+        const T = esRec(a) ? TIPOS.recorrido : (TIPOS[a.tipo] || TIPOS.desarrollo);
+        return `<tr><td style="${TD};text-align:center">${i + 1}</td><td style="${TD}">${esc(a.titulo)}</td><td style="${TD}">${esc(T.nom)}</td>
+          <td style="${TD}">${r ? (r.estado === 'evaluada' ? 'Evaluada' : 'Por evaluar') : 'Sin responder'}</td>
+          <td style="${TD};text-align:center">${r && r.estado === 'evaluada' ? esc(r.puntaje_final) : '–'} / ${esc(a.puntaje_max)}</td></tr>`;
+      }).join('');
+      const detalle = acts.filter(a => !esRec(a)).map(a => {
+        const r = d.rs.find(x => x.actividad_id === a.id);
+        if (!r) return '';
+        return `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin-bottom:8px">
+          <b>${esc(a.titulo)}</b> <span style="color:#64748b">(${esc((TIPOS[a.tipo] || TIPOS.desarrollo).nom)} · ${esc(a.puntaje_max)} pt)</span>
+          <p style="margin:5px 0;white-space:pre-line">${esc(respuestaTexto(a, r)) || '<i>(solo fotografía)</i>'}</p>${imgs(r, 150)}
+          <p style="margin:5px 0 0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) : 'Por evaluar'}${r.retro_docente ? ` · <b>Observación del docente:</b> ${esc(r.retro_docente)}` : ''}</p></div>`;
+      }).join('');
+      const recs = d.rs.map(r => ({ r, a: actPor(r.actividad_id) })).filter(x => esRec(x.a) && recDe(x.r));
+      const secRec = recs.length ? tituloPDF(sec++ + 0, '') && '' : '';
+      const nSec = () => sec++;
+      let html = encabezadoPDF('Informe individual de salida a terreno', 'Resultados, recorridos y registro de actividades', logo);
+      html += tituloPDF(nSec(), 'Identificación del estudiante') + `<table style="width:100%;border-collapse:collapse">
+        <tr><td style="${TH};width:18%">Estudiante</td><td style="${TD}">${esc(d.est.nombre)}</td><td style="${TH};width:12%">RUT</td><td style="${TD}">${esc(d.est.rut)}</td></tr>
+        <tr><td style="${TH}">Curso</td><td style="${TD}">${esc(d.est.curso)}</td><td style="${TH}">Carta de compromiso</td><td style="${TD}">${d.firma ? 'Firmada' : 'Sin firmar'}</td></tr></table>`;
+      html += tituloPDF(nSec(), 'Resumen de resultados') + `<table style="width:100%;border-collapse:collapse">
+        <tr><td style="${TH};width:34%">Actividades respondidas</td><td style="${TD}">${d.respondidas} de ${acts.length}</td></tr>
+        <tr><td style="${TH}">Puntaje obtenido</td><td style="${TD}">${esc(d.pts)} de ${esc(maxTotal)} puntos</td></tr>
+        <tr><td style="${TH}">Porcentaje de logro</td><td style="${TD}">${Math.round(d.pct)} %</td></tr>
+        <tr><td style="${TH}">Escala de notas</td><td style="${TD}">1,0 a 7,0 con ${EXIGENCIA} % de exigencia (el ${EXIGENCIA} % de logro equivale a 4,0)</td></tr>
+        <tr><td style="${TH}">Nota final</td><td style="${TD};font-size:15px"><b>${nf(d.nota)}</b>${d.ajustada ? ' (ajustada por el docente; nota calculada: ' + nf(d.notaCalc) + ')' : ''}${d.porEvaluar ? ' · provisoria, hay respuestas por evaluar' : ''}</td></tr></table>`;
+      html += tituloPDF(nSec(), 'Detalle por actividad') + `<table style="width:100%;border-collapse:collapse"><tr><th style="${TH};width:6%">N°</th><th style="${TH}">Actividad</th><th style="${TH};width:16%">Tipo</th><th style="${TH};width:15%">Estado</th><th style="${TH};width:14%">Puntaje</th></tr>${filas}</table>`;
+      if (detalle) html += `<div style="font-weight:bold;margin:10px 0 4px">Respuestas y observaciones</div>${detalle}`;
+      if (recs.length) {
+        html += tituloPDF(nSec(), 'Recorridos realizados') + `<table style="width:100%;border-collapse:collapse"><tr>
+          <th style="${TH}">Recorridos</th><th style="${TH}">Distancia total</th><th style="${TH}">En movimiento</th><th style="${TH}">Subida</th><th style="${TH}">Bajada</th><th style="${TH}">Calorías (aprox.)</th></tr>
+          <tr><td style="${TD}">${d.rec.n}</td><td style="${TD}">${fmtKm(d.rec.dist)}</td><td style="${TD}">${fmtDur(d.rec.mov)}</td><td style="${TD}">+${Math.round(d.rec.sub)} m</td><td style="${TD}">−${Math.round(d.rec.baj)} m</td><td style="${TD}">≈ ${Math.round(d.rec.kcal)} kcal</td></tr></table>`;
+        recs.forEach(({ r, a }) => {
+          const rec = recDe(r), fot = jsonSeguro(r.fotos, {});
+          html += `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin:8px 0"><b>${esc(a.titulo)}</b> · ${fmtKm(rec.dist)} · ${fmtDur(rec.dur)} · +${rec.sub} m / −${rec.baj} m · ≈ ${rec.kcal} kcal
+            <div style="margin-top:6px">${svgRutaRec(rec)}</div><div style="margin-top:6px">${svgPerfil(rec)}</div><div style="margin-top:6px">` +
+            hitosDe(a).map((hh, i) => {
+              const u = fot[hh.id] && fotos[fot[hh.id]], x = rec.hitos[hh.id];
+              return u ? `<span style="display:inline-block;width:32%;margin-right:1%;vertical-align:top;font-size:10px"><img src="${u}" style="width:100%;max-height:120px;object-fit:cover;border-radius:4px"><br>${i + 1}. ${esc(hh.enunciado)}${x && x.a != null ? ' · ' + x.a + ' m' : ''}${x && x.dp != null ? ' · a ' + fmtDist(x.dp) + ' del lugar' : ''}</span>` : '';
+            }).join('') + `</div>${rec.amb0 ? `<div style="font-size:10px;color:#475569;margin-top:4px">Condiciones al iniciar: ${fmtClima(rec.amb0)} (modelo Open-Meteo)</div>` : ''}</div>`;
+        });
+        html += '<div style="font-size:10px;color:#64748b">Las calorías son un cálculo aproximado según distancia, tiempo y desnivel. Las alturas provienen del modelo digital de elevación o del GPS del teléfono.</div>';
+      }
+      const resp = d.rs.map(r => ({ lat: r.lat, lng: r.lng, n: acts.findIndex(a => a.id === r.actividad_id) + 1 }));
+      html += tituloPDF(nSec(), 'Ubicaciones registradas') + svgMapa(resp, S.panel.puntos) + firmaPDF();
+      await html2pdf().set(PDF_OPC('Informe_' + d.est.nombre.replace(/\s+/g, '_') + '.pdf')).from(envoltura(html), 'string').save();
+    } catch (e) { aviso('No se pudo generar el informe: ' + e.message, 'error'); }
+    finally { cargando(false); }
+  };
+
+  reporteGeneral = async function () {
+    const est = calcularEstudiantes(), P = S.panel;
+    cargando(true, 'Generando el informe…');
+    try {
+      const logo = S.insignia || await cargarInsignia();
+      const notas = est.map(e => e.nota);
+      const prom = notas.length ? notas.reduce((s, n) => s + n, 0) / notas.length : 0;
+      const aprob = notas.filter(n => n >= 4).length;
+      const T = totalesRec(est);
+      const entrega = P.actividades.length && est.length ? est.reduce((s, e) => s + e.respondidas, 0) / (est.length * P.actividades.length) * 100 : 0;
+      const filasEst = est.map((e, i) => `<tr class="avoid"><td style="${TD};text-align:center">${i + 1}</td><td style="${TD}">${esc(e.est.nombre)}</td><td style="${TD}">${esc(e.est.rut)}</td><td style="${TD}">${esc(e.est.curso)}</td>
+        <td style="${TD};text-align:center">${e.firma ? 'Sí' : 'No'}</td><td style="${TD};text-align:center">${e.respondidas}/${P.actividades.length}</td><td style="${TD};text-align:center">${Math.round(e.pct)} %</td>
+        <td style="${TD};text-align:center"><b>${nf(e.nota)}</b>${e.ajustada ? '*' : ''}</td><td style="${TD};text-align:center">${e.rec.n ? fmtKm(e.rec.dist) : '–'}</td></tr>`).join('');
+      const filasAct = P.actividades.map((a, i) => {
+        const rs = P.respuestas.filter(r => r.actividad_id === a.id), ev = rs.filter(r => r.estado === 'evaluada');
+        const logro = ev.length ? ev.reduce((s, r) => s + Number(r.puntaje_final || 0), 0) / (ev.length * Number(a.puntaje_max || 1)) * 100 : null;
+        return `<tr><td style="${TD};text-align:center">${i + 1}</td><td style="${TD}">${esc(a.titulo)}</td><td style="${TD};text-align:center">${rs.length} de ${est.length}</td><td style="${TD};text-align:center">${logro === null ? '–' : Math.round(logro) + ' %'}</td></tr>`;
+      }).join('');
+      let n = 0;
+      let html = encabezadoPDF('Informe general de salida a terreno', 'Resultados del curso', logo);
+      html += tituloPDF(n++, 'Síntesis') + `<p style="line-height:1.5">${esc(sintesisGrupo(est))}</p>`;
+      html += tituloPDF(n++, 'Indicadores del curso') + `<table style="width:100%;border-collapse:collapse"><tr>
+        <th style="${TH}">Estudiantes</th><th style="${TH}">Entrega promedio</th><th style="${TH}">Nota promedio</th><th style="${TH}">Nota máxima</th><th style="${TH}">Nota mínima</th><th style="${TH}">Aprobación (≥ 4,0)</th></tr>
+        <tr><td style="${TD}">${est.length}</td><td style="${TD}">${Math.round(entrega)} %</td><td style="${TD}"><b>${nf(prom)}</b></td><td style="${TD}">${notas.length ? nf(Math.max(...notas)) : '–'}</td><td style="${TD}">${notas.length ? nf(Math.min(...notas)) : '–'}</td><td style="${TD}">${est.length ? aprob + ' de ' + est.length + ' (' + Math.round(aprob / est.length * 100) + ' %)' : '–'}</td></tr></table>
+        <div style="font-size:10px;color:#64748b;margin-top:3px">Escala de 1,0 a 7,0 con ${EXIGENCIA} % de exigencia. * Nota ajustada por el docente.</div>`;
+      html += tituloPDF(n++, 'Resultados por estudiante') + `<table style="width:100%;border-collapse:collapse"><tr><th style="${TH};width:5%">N°</th><th style="${TH}">Estudiante</th><th style="${TH}">RUT</th><th style="${TH}">Curso</th><th style="${TH}">Firma</th><th style="${TH}">Entregas</th><th style="${TH}">Logro</th><th style="${TH}">Nota</th><th style="${TH}">Recorrido</th></tr>${filasEst}</table>`;
+      html += tituloPDF(n++, 'Resultados por actividad') + `<table style="width:100%;border-collapse:collapse"><tr><th style="${TH};width:6%">N°</th><th style="${TH}">Actividad</th><th style="${TH};width:18%">Respondieron</th><th style="${TH};width:16%">Logro promedio</th></tr>${filasAct}</table>`;
+      if (T.n) html += tituloPDF(n++, 'Recorridos del curso') + `<table style="width:100%;border-collapse:collapse"><tr><th style="${TH}">Recorridos</th><th style="${TH}">Distancia total</th><th style="${TH}">Tiempo en movimiento</th><th style="${TH}">Subida acumulada</th><th style="${TH}">Calorías (aprox.)</th></tr>
+        <tr><td style="${TD}">${T.n}</td><td style="${TD}">${fmtKm(T.dist)}</td><td style="${TD}">${fmtDur(T.mov)}</td><td style="${TD}">+${Math.round(T.sub)} m</td><td style="${TD}">≈ ${Math.round(T.kcal)} kcal</td></tr></table>
+        <div style="font-size:10px;color:#64748b;margin-top:3px">Las calorías son un cálculo aproximado según distancia, tiempo y desnivel.</div>`;
+      html += firmaPDF();
+      await html2pdf().set(PDF_OPC('Informe_general_salida_terreno.pdf')).from(envoltura(html), 'string').save();
+    } catch (e) { aviso('No se pudo generar el informe: ' + e.message, 'error'); }
+    finally { cargando(false); }
+  };
+  const _sintesisGrupoRec = sintesisGrupo;
+  sintesisGrupo = function (est) {
+    const t = _sintesisGrupoRec(est), T = totalesRec(est);
+    return T.n ? t + ` Recorridos: ${T.n} registrados, ${fmtKm(T.dist)} en total, subida acumulada de ${Math.round(T.sub)} m y unas ${Math.round(T.kcal)} kcal (cálculo aproximado).` : t;
+  };
+  exportarCSV = function () {
+    const est = calcularEstudiantes(), T = totalesRec(est);
+    const cel = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const coma = n => String(n).replace('.', ',');
+    const filas = [['Nombre', 'RUT', 'Curso', 'Firma', 'Respondidas', 'Total actividades', 'Puntaje', 'Logro %', 'Nota', 'Recorridos', 'Km recorridos', 'Minutos en movimiento', 'Subida (m)', 'Calorías aprox.']]
+      .concat(est.map(e => [e.est.nombre, e.est.rut, e.est.curso, e.firma ? 'Sí' : 'No', e.respondidas, S.panel.actividades.length, e.pts, Math.round(e.pct), e.nota.toFixed(1).replace('.', ','),
+        e.rec.n, coma((e.rec.dist / 1000).toFixed(2)), Math.round(e.rec.mov / 60), Math.round(e.rec.sub), Math.round(e.rec.kcal)]))
+      .concat([['TOTAL DEL CURSO', '', '', '', '', '', '', '', '', T.n, coma((T.dist / 1000).toFixed(2)), Math.round(T.mov / 60), Math.round(T.sub), Math.round(T.kcal)]]);
+    const blob = new Blob(['\ufeff' + filas.map(f => f.map(cel).join(';')).join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'resumen_salida_terreno.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+}
+
+/* =========================================================
+   EVENTOS DE ESTE ARCHIVO
+   ========================================================= */
+const _mm = $('#modal');
+if (_mm) _mm.style.zIndex = '47';   // las ventanas (ficha, etc.) deben verse sobre la pantalla del recorrido
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-accion]');
+  if (!b) return;
+  const a = b.dataset.accion, id = b.dataset.id;
+  if (a.indexOf('rec-') !== 0) return;
+  try {
+    switch (a) {
+      case 'rec-iniciar': return await iniciarRec();
+      case 'rec-terminar': return await terminarRec();
+      case 'rec-cerrar':
+        cerrarOverlay();
+        if (REC && REC.estado === 'activo') aviso('El recorrido sigue en curso. Para volver, pinche «Abrir recorrido» en la actividad.');
+        return;
+      case 'rec-enviar': return await enviarRec();
+      case 'rec-descartar': return await descartarRec();
+      case 'rec-ver': return verRec(id, b.dataset.doc);
+      case 'rec-aprobar': return typeof aprobarRec === 'function' ? await aprobarRec(id) : undefined;
+      case 'rec-aprobar-todos': return typeof aprobarTodosRec === 'function' ? await aprobarTodosRec() : undefined;
+    }
+  } catch (err) { cargando(false); aviso(err.message, 'error'); }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t && t.dataset && t.dataset.rhito && t.files && t.files[0]) {
+    fotoHito(t.dataset.rhito, t.files[0]).catch(err => { cargando(false); aviso(err.message, 'error'); });
+  }
+});
