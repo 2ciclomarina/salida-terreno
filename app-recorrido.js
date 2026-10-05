@@ -5,6 +5,7 @@
    Pestañas de recorridos · barra de avance · informes formales (PDF)
    Lista de estudiantes · evaluación de quienes no enviaron nada
    Evaluación manual de recorridos · docentes ayudantes
+   Cartas firmadas · informe individual completo · nombre editable de la firma
    Se carga después de app-extra.js (y de app-docente.js en el panel docente)
    ========================================================= */
 
@@ -26,7 +27,7 @@ const esSinResp = r => String((r && r.client_id) || '').indexOf('doc-') === 0;  
 
 /* ---------- Nivel de acceso del docente (titular o ayudante) ---------- */
 const esTitular = () => !(typeof S !== 'undefined' && S && S.panel && S.panel.yo && S.panel.yo.nivel === 'ayudante');
-const ACC_SOLO_TITULAR = /^(editar-nota|editar-carta|est-|ay-|importar|insignia|nomina|elim|borr|del)/i;
+const ACC_SOLO_TITULAR = /^(editar-nota|editar-carta|est-|ay-|firma-inf|importar|insignia|nomina|elim|borr|del)/i;
 // Los ayudantes no pueden usar estas acciones (el servidor también las rechaza)
 document.addEventListener('click', e => {
   if (esTitular()) return;
@@ -785,8 +786,11 @@ async function verTrayecto() {
    ========================================================= */
 if (typeof accionDocente === 'function') {
   const INPR = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
-  const DOCENTE_NOMBRE = 'Prof. Cristian Yáñez Reyes';   // nombre que firma los informes
   const COLEGIO = 'Colegio Marina de Chile';
+  // Nombre que firma los informes: se cambia desde Ajustes → Firma de los informes
+  const NOMBRE_DEF = 'Prof. Cristian Yáñez Reyes';
+  const nombreFirma = () => ((S.panel && S.panel.firma_informe && S.panel.firma_informe.nombre) || NOMBRE_DEF);
+  const cargoFirma = () => ((S.panel && S.panel.firma_informe && S.panel.firma_informe.cargo) || 'Docente a cargo');
 
   // Totales de recorridos por estudiante
   const _calcularEstudiantesRec = calcularEstudiantes;
@@ -1012,6 +1016,142 @@ if (typeof accionDocente === 'function') {
     } catch (err) { cargando(false); aviso(err.message, 'error'); }
   }
 
+  /* --- Cartas firmadas: ver y descargar --- */
+  const verCartaActual = () => String(((S.panel && S.panel.carta) || {}).version || '');
+  // Última firma de un estudiante (se prefiere la de la versión vigente de la carta)
+  function firmaDe(k) {
+    const l = S.panel.firmas.filter(f => rutKey(f.rut) === k)
+      .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+    return l.find(f => String(f.carta_version || '') === verCartaActual()) || l[0] || null;
+  }
+  // Texto de la carta que firmó (si quedó guardado) o el texto vigente
+  function cartaDeFirma(f) {
+    const snap = jsonSeguro(f.carta_texto, null);
+    if (snap && Array.isArray(snap.items) && snap.items.length) return { c: snap, snap: true, igual: true };
+    const act = S.panel.carta || {};
+    return { c: act, snap: false, igual: String(f.carta_version || '') === String(act.version || '') };
+  }
+  const notaCarta = x => x.snap ? '' : (x.igual
+    ? 'La firma se registró antes de que el sistema guardara el texto firmado; se muestra el texto vigente de esta versión de la carta.'
+    : 'Firmó una versión anterior de la carta; el texto exacto de esa versión no quedó guardado y aquí se muestra el texto vigente.');
+  const FILT_C = { q: '', curso: '', est: 'todos' };
+  function estadoCarta(e) {
+    const f = firmaDe(rutKey(e.rut));
+    if (!f) return { f: null, tipo: 'sin' };
+    return { f, tipo: String(f.carta_version || '') === verCartaActual() ? 'vigente' : 'antigua' };
+  }
+  function cartasFiltradas() {
+    const q = FILT_C.q.toLowerCase().trim();
+    return S.panel.estudiantes.filter(e => String(e.activo).toLowerCase() !== 'no')
+      .filter(e => (!FILT_C.curso || e.curso === FILT_C.curso) && (!q || (e.nombre + ' ' + e.rut).toLowerCase().indexOf(q) >= 0))
+      .map(e => Object.assign({ e }, estadoCarta(e)))
+      .filter(x => FILT_C.est === 'todos' || (FILT_C.est === 'firmaron' ? x.tipo === 'vigente' : x.tipo !== 'vigente'))
+      .sort((x, y) => String(x.e.nombre).localeCompare(String(y.e.nombre), 'es'));
+  }
+  function listaCartasHTML() {
+    const l = cartasFiltradas();
+    if (!l.length) return '<p class="text-sm text-slate-500 py-4 text-center">No hay estudiantes con ese filtro.</p>';
+    return l.map(x => `<div class="flex flex-wrap items-center gap-2 border-t py-2">
+      <div class="flex-1 min-w-[12rem]"><div class="font-semibold">${esc(x.e.nombre)}</div><div class="text-xs text-slate-500">RUT ${esc(x.e.rut)} · ${esc(x.e.curso)}${x.f ? ' · ' + esc(x.f.fecha_hora) : ''}</div></div>
+      ${x.tipo === 'vigente' ? chip('Firmó', 'emerald') : x.tipo === 'antigua' ? chip('Versión anterior', 'amber') : chip('Sin firmar', 'rose')}
+      ${x.f ? `<button data-accion="carta-ver" data-rut="${esc(rutKey(x.e.rut))}" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">👁️ Ver carta</button>
+        <button data-accion="carta-pdf" data-rut="${esc(rutKey(x.e.rut))}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm">⬇️ PDF</button>` : ''}</div>`).join('');
+  }
+  function renderCartasDoc() {
+    const act = S.panel.estudiantes.filter(e => String(e.activo).toLowerCase() !== 'no');
+    const vig = act.filter(e => estadoCarta(e).tipo === 'vigente').length;
+    const pct = act.length ? Math.round(vig / act.length * 100) : 0;
+    const cursos = Array.from(new Set(S.panel.estudiantes.map(e => e.curso).filter(Boolean))).sort();
+    $('#doc-contenido').innerHTML = `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">
+      <div class="flex flex-wrap items-center gap-2"><h3 class="font-bold text-lg flex-1">📜 Cartas de compromiso firmadas</h3>
+        <button data-accion="carta-todas" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">⬇️ PDF con todas las cartas</button></div>
+      <div><div class="flex justify-between text-sm"><span><b>${vig}</b> de ${act.length} estudiantes firmaron la versión vigente</span><span class="font-bold">${pct} %</span></div>
+        <div class="h-3 rounded-full bg-slate-200 overflow-hidden mt-1"><div class="h-3 rounded-full" style="width:${pct}%;background:#10b981"></div></div></div>
+      <div class="flex flex-wrap gap-2"><input id="car-buscar" placeholder="Buscar por nombre o RUT" value="${esc(FILT_C.q)}" class="${INPR} flex-1 min-w-[12rem]">
+        <select id="car-curso" class="border rounded-xl px-3 py-2"><option value="">Todos los cursos</option>${cursos.map(c => `<option value="${esc(c)}" ${FILT_C.curso === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <select id="car-estado" class="border rounded-xl px-3 py-2"><option value="todos" ${FILT_C.est === 'todos' ? 'selected' : ''}>Todos</option>
+          <option value="firmaron" ${FILT_C.est === 'firmaron' ? 'selected' : ''}>Firmaron la versión vigente</option><option value="sin" ${FILT_C.est === 'sin' ? 'selected' : ''}>Sin firma vigente</option></select></div>
+      <div id="car-lista">${listaCartasHTML()}</div>
+      <p class="text-xs text-slate-500">Se muestran los estudiantes activos. El PDF con todas las cartas respeta el curso y el estado elegidos arriba; si son muchos, puede tardar un poco (conviene hacerlo desde un computador).</p></div>`;
+  }
+  document.addEventListener('input', ev => {
+    if (ev.target.id !== 'car-buscar') return;
+    FILT_C.q = ev.target.value;
+    const c = $('#car-lista'); if (c) c.innerHTML = listaCartasHTML();
+  });
+  document.addEventListener('change', ev => {
+    const id = ev.target.id;
+    if (id !== 'car-curso' && id !== 'car-estado') return;
+    if (id === 'car-curso') FILT_C.curso = ev.target.value; else FILT_C.est = ev.target.value;
+    const c = $('#car-lista'); if (c) c.innerHTML = listaCartasHTML();
+  });
+  function verCarta(k) {
+    const f = firmaDe(k);
+    if (!f) return aviso('Este estudiante aún no firma la carta.');
+    const x = cartaDeFirma(f), c = x.c || {};
+    modal(`<div class="space-y-3 pt-2">
+      <h3 class="text-lg font-extrabold pr-6">${esc(c.titulo || 'Carta de compromiso')}</h3>
+      <div class="rounded-xl bg-slate-50 p-3 text-sm"><b>${esc(f.nombre)}</b> · RUT ${esc(f.rut)} · ${esc(f.curso)}<br>Firmó el ${esc(f.fecha_hora)}</div>
+      ${c.intro ? `<p class="text-sm">${esc(c.intro)}</p>` : ''}
+      <ol class="list-decimal pl-5 text-sm space-y-1">${(c.items || []).map(t => `<li class="whitespace-pre-line">${esc(t)}</li>`).join('')}</ol>
+      <p class="text-sm font-semibold">✔ ${esc(c.aceptacion || '')}</p>
+      <div class="rounded-2xl border bg-white p-3 text-center"><div class="text-xs text-slate-500 mb-1">Firma del estudiante</div>
+        <img data-archivo="${esc(f.firma_id)}" class="mx-auto max-h-32 bg-slate-50 rounded" alt="Firma"></div>
+      ${notaCarta(x) ? `<p class="text-xs text-amber-700 bg-amber-50 rounded-xl p-2">${esc(notaCarta(x))}</p>` : ''}
+      <button data-accion="carta-pdf" data-rut="${esc(k)}" class="w-full bg-teal-700 text-white font-bold py-2.5 rounded-2xl">⬇️ Descargar PDF de esta carta</button></div>`);
+    pintarImagenes($('#modal-cuerpo'));
+  }
+  // Cuerpo de la carta firmada (texto + firma) para los PDF
+  function cuerpoCartaHTML(f, img) {
+    const x = cartaDeFirma(f), c = x.c || {};
+    return `<p style="line-height:1.5;margin:4px 0">${esc(c.intro || '')}</p>
+      <ol style="margin:6px 0 6px 18px;padding:0;line-height:1.45">${(c.items || []).map(t => `<li style="margin-bottom:3px;white-space:pre-line">${esc(t)}</li>`).join('')}</ol>
+      <p style="margin:6px 0"><b>✔ ${esc(c.aceptacion || '')}</b></p>
+      <div style="margin-top:10px;text-align:center">${img ? `<img src="${img}" style="max-height:90px;max-width:260px">` : '<div style="height:60px"></div>'}<br>
+        <div style="display:inline-block;min-width:240px;border-top:1px solid #111;padding-top:3px;font-size:11px"><b>${esc(f.nombre)}</b><br>RUT ${esc(f.rut)} · ${esc(f.curso)}<br>Firmó el ${esc(f.fecha_hora)}</div></div>
+      ${notaCarta(x) ? `<div style="font-size:9px;color:#64748b;margin-top:6px">${esc(notaCarta(x))}</div>` : ''}`;
+  }
+  function paginaCarta(f, img, logo, salto) {
+    const c = cartaDeFirma(f).c || {};
+    const titulo = String(c.titulo || 'Carta de compromiso').replace(/^[^A-Za-zÁÉÍÓÚáéíóúÑñ0-9]+/, '');
+    return `<div class="avoid" style="${salto ? 'page-break-before:always;' : ''}">
+      ${encabezadoPDF(esc(titulo), 'Carta de compromiso firmada · Salida a terreno', logo)}
+      <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
+        <tr><td style="${TH};width:18%">Estudiante</td><td style="${TD}">${esc(f.nombre)}</td><td style="${TH};width:12%">RUT</td><td style="${TD}">${esc(f.rut)}</td></tr>
+        <tr><td style="${TH}">Curso</td><td style="${TD}">${esc(f.curso)}</td><td style="${TH}">Firmó el</td><td style="${TD}">${esc(f.fecha_hora)}</td></tr></table>
+      ${cuerpoCartaHTML(f, img)}
+      <div style="font-size:9px;color:#64748b;margin-top:14px;text-align:center">Documento firmado desde la aplicación Salida a Terreno · ${esc(COLEGIO)}</div></div>`;
+  }
+  async function pdfCartas(keys, nombre) {
+    cargando(true, 'Preparando las cartas…');
+    try {
+      const logo = S.insignia || await cargarInsignia();
+      let html = '', n = 0;
+      for (const k of keys) {
+        const f = firmaDe(k);
+        if (!f) continue;
+        cargando(true, 'Preparando las cartas (' + (++n) + '/' + keys.length + ')…');
+        const img = f.firma_id ? await dataUrlArchivo(f.firma_id).catch(() => null) : null;
+        html += paginaCarta(f, img, logo, n > 1);
+      }
+      if (!n) return aviso('No hay cartas firmadas para descargar.');
+      cargando(true, 'Generando el PDF…');
+      await html2pdf().set(PDF_OPC(nombre)).from(envoltura(html), 'string').save();
+    } catch (e) { aviso('No se pudo generar el PDF: ' + e.message, 'error'); }
+    finally { cargando(false); }
+  }
+  function pdfCartaUna(k) {
+    const f = firmaDe(k);
+    if (!f) return aviso('Este estudiante aún no firma la carta.');
+    return pdfCartas([k], 'Carta_firmada_' + String(f.nombre).replace(/\s+/g, '_') + '.pdf');
+  }
+  function pdfCartasTodas() {
+    const keys = cartasFiltradas().filter(x => x.f).map(x => rutKey(x.e.rut));
+    if (!keys.length) return aviso('No hay cartas firmadas con ese filtro.');
+    if (!confirm('Se generará un PDF con ' + keys.length + ' carta(s) firmada(s). Puede tardar un poco. ¿Continuar?')) return;
+    return pdfCartas(keys, 'Cartas_firmadas_' + (FILT_C.curso ? FILT_C.curso.replace(/\s+/g, '_') : 'todos_los_cursos') + '.pdf');
+  }
+
   /* --- Docentes ayudantes (solo el docente titular) --- */
   function renderAyudantesDoc() {
     const l = S.panel.ayudantes || [];
@@ -1019,7 +1159,7 @@ if (typeof accionDocente === 'function') {
       <div class="flex flex-wrap items-center gap-2"><h3 class="font-bold text-lg flex-1">🤝 Docentes ayudantes <span class="text-sm font-normal text-slate-500">(${l.length})</span></h3>
         <button data-accion="ay-nuevo" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">+ Agregar ayudante</button></div>
       <div class="grid sm:grid-cols-2 gap-3 text-sm">
-        <div class="rounded-xl bg-emerald-50 p-3"><b>Pueden:</b><br>crear y editar actividades, recorridos, lugares, fichas y la presentación; subir imágenes; revisar y evaluar respuestas (también con la IA); ver los reportes.</div>
+        <div class="rounded-xl bg-emerald-50 p-3"><b>Pueden:</b><br>crear y editar actividades, recorridos, lugares, fichas y la presentación; subir imágenes; revisar y evaluar respuestas (también con la IA); ver los reportes y las cartas firmadas.</div>
         <div class="rounded-xl bg-rose-50 p-3"><b>No pueden:</b><br>eliminar actividades ni lugares; cambiar la carta, la nómina o el escudo; editar, desactivar o eliminar estudiantes; modificar las notas finales; administrar ayudantes.</div></div>
       ${l.length ? l.map(a => `<div class="flex flex-wrap items-center gap-2 border-t py-2">
         <div class="flex-1 min-w-[12rem]"><div class="font-semibold">${esc(a.nombre)}</div><div class="text-xs text-slate-500">Creado el ${fechaCorta(a.creado)}</div></div>
@@ -1076,6 +1216,35 @@ if (typeof accionDocente === 'function') {
     } catch (err) { cargando(false); aviso(err.message, 'error'); }
   }
 
+  /* --- Nombre que firma los informes (Ajustes) --- */
+  function formFirmaInforme() {
+    modal(`<form id="f-firmainf" class="space-y-3 pt-2">
+      <h3 class="text-lg font-extrabold pr-6">✍️ Firma de los informes</h3>
+      <p class="text-xs text-slate-500">Es el nombre que aparece firmando los informes en PDF (el individual y el general).</p>
+      <label class="block text-sm font-semibold">Nombre<input name="nombre" required maxlength="80" class="${INPR} mt-1" value="${esc(nombreFirma())}"></label>
+      <label class="block text-sm font-semibold">Cargo o línea bajo el nombre<input name="cargo" maxlength="80" class="${INPR} mt-1" value="${esc(cargoFirma())}"></label>
+      <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar</button></form>`);
+    const f = $('#f-firmainf');
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      cargando(true, 'Guardando…');
+      try {
+        const d = await api('guardarFirmaInforme', { nombre: f.nombre.value.trim(), cargo: f.cargo.value.trim() });
+        S.panel.firma_informe = d.firma_informe;
+        cerrarModal(); redibujar(); aviso('Firma de los informes actualizada.');
+      } catch (err) { aviso(err.message, 'error'); } finally { cargando(false); }
+    };
+  }
+  const _renderAjustesFirma = renderAjustes;
+  renderAjustes = function () {
+    _renderAjustesFirma();
+    $('#doc-contenido').insertAdjacentHTML('afterbegin', `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2 mb-4">
+      <h3 class="font-bold">✍️ Firma de los informes</h3>
+      <p class="text-sm text-slate-500">Nombre que aparece firmando los informes en PDF.</p>
+      <p class="text-sm">Actualmente: <b>${esc(nombreFirma())}</b> · ${esc(cargoFirma())}</p>
+      <button data-accion="firma-inf-editar" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">✏️ Cambiar el nombre</button></div>`);
+  };
+
   // Acciones del panel que maneja este archivo
   const _accionDocenteRec = accionDocente;
   accionDocente = async function (a, b, id) {
@@ -1090,6 +1259,10 @@ if (typeof accionDocente === 'function') {
     if (a === 'ay-editar') return formAyudante(id);
     if (a === 'ay-activar') return cambiarActivoAy(id);
     if (a === 'ay-eliminar') return eliminarAy(id);
+    if (a === 'carta-ver') return verCarta(b.dataset.rut);
+    if (a === 'carta-pdf') return pdfCartaUna(b.dataset.rut);
+    if (a === 'carta-todas') return pdfCartasTodas();
+    if (a === 'firma-inf-editar') return formFirmaInforme();
     return _accionDocenteRec(a, b, id);
   };
   const _renderActividadesRec = renderActividades;
@@ -1104,10 +1277,12 @@ if (typeof accionDocente === 'function') {
     });
   };
 
-  /* --- Pestañas «Recorridos», «Estudiantes» y «Ayudantes» del docente --- */
+  /* --- Pestañas «Recorridos», «Estudiantes», «Cartas» y «Ayudantes» del docente --- */
+  const posTab = k => TABS_DOC.findIndex(t => t[0] === k);
   if (!TABS_DOC.some(t => t[0] === 'recorridos')) TABS_DOC.splice(4, 0, ['recorridos', '🥾 Recorridos']);
-  if (!TABS_DOC.some(t => t[0] === 'estudiantes')) TABS_DOC.splice(TABS_DOC.findIndex(t => t[0] === 'recorridos') + 1, 0, ['estudiantes', '👥 Estudiantes']);
-  if (!TABS_DOC.some(t => t[0] === 'ayudantes')) TABS_DOC.splice(TABS_DOC.findIndex(t => t[0] === 'estudiantes') + 1, 0, ['ayudantes', '🤝 Ayudantes']);
+  if (!TABS_DOC.some(t => t[0] === 'estudiantes')) TABS_DOC.splice(posTab('recorridos') + 1, 0, ['estudiantes', '👥 Estudiantes']);
+  if (!TABS_DOC.some(t => t[0] === 'cartas')) TABS_DOC.splice(posTab('estudiantes') + 1, 0, ['cartas', '📜 Cartas firmadas']);
+  if (!TABS_DOC.some(t => t[0] === 'ayudantes')) TABS_DOC.splice(posTab('cartas') + 1, 0, ['ayudantes', '🤝 Ayudantes']);
   function renderRecorridosDoc() {
     const est = calcularEstudiantes(), T = totalesRec(est);
     const kpi = (t, v) => `<div class="rounded-2xl bg-white/95 shadow p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
@@ -1137,7 +1312,7 @@ if (typeof accionDocente === 'function') {
     $('#doc-tabs').innerHTML = tabs.map(([k, t]) =>
       `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}${k === 'respuestas' && porEvaluar ? ` <span class="ml-1 text-xs bg-amber-400 text-slate-900 rounded-full px-1.5">${porEvaluar}</span>` : ''}</button>`).join('');
     detenerMapa();
-    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, estudiantes: renderEstudiantesDoc, ayudantes: renderAyudantesDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
+    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, estudiantes: renderEstudiantesDoc, cartas: renderCartasDoc, ayudantes: renderAyudantesDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
     f();
     if (!titular) {
       // El ayudante no ve los botones de eliminar ni de modificar notas
@@ -1229,17 +1404,86 @@ if (typeof accionDocente === 'function') {
   const TD = 'border:1px solid #94a3b8;padding:4px 6px;font-size:11px;vertical-align:top';
   const TH = TD + ';background:#e2e8f0;font-weight:bold;text-align:left';
   const nf = n => Number(n).toFixed(1).replace('.', ',');
-  const ROM = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+  const ROM = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
+  const ETIQ_NIVEL = { L: 'Logrado', M: 'Medianamente logrado', N: 'No observado' };
   const encabezadoPDF = (titulo, sub, logo) => `<table style="width:100%;border-collapse:collapse;border-bottom:3px solid #0f766e;margin-bottom:12px"><tr>
     <td style="width:76px;padding-bottom:8px">${logo ? `<img src="${logo}" style="height:64px">` : ''}</td>
     <td style="padding-bottom:8px"><div style="font-size:10px;letter-spacing:1.5px;color:#475569;text-transform:uppercase">${esc(COLEGIO)}</div>
       <div style="font-size:19px;font-weight:bold;color:#0f172a">${titulo}</div><div style="font-size:11px;color:#475569">${sub}</div></td>
     <td style="text-align:right;font-size:10px;color:#475569;vertical-align:top">Emitido el<br><b>${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })}</b></td></tr></table>`;
   const tituloPDF = (n, t) => `<div style="font-size:13px;font-weight:bold;color:#fff;background:#0f766e;padding:4px 8px;margin:14px 0 6px;border-radius:3px">${ROM[n]}. ${t}</div>`;
-  const firmaPDF = () => `<div style="margin-top:38px;text-align:center"><div style="display:inline-block;min-width:240px;border-top:1px solid #111;padding-top:4px;font-size:11px"><b>${esc(DOCENTE_NOMBRE)}</b><br>Docente a cargo<br>${esc(COLEGIO)}</div></div>`;
+  const firmaPDF = () => `<div style="margin-top:38px;text-align:center"><div style="display:inline-block;min-width:240px;border-top:1px solid #111;padding-top:4px;font-size:11px"><b>${esc(nombreFirma())}</b><br>${esc(cargoFirma())}<br>${esc(COLEGIO)}</div></div>`;
   const PDF_OPC = nombre => ({ margin: 12, filename: nombre, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true },
     jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: '.avoid' } });
   const envoltura = c => `<div style="width:720px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;background:#fff">${c}</div>`;
+
+  // Ids de todas las imágenes que subió el estudiante en una respuesta
+  const idsFotosResp = r => {
+    const s = new Set(), o = jsonSeguro(r.fotos, {}) || {};
+    Object.keys(o).forEach(k => { if (o[k]) s.add(o[k]); });
+    if (r.foto_id) s.add(r.foto_id);
+    return Array.from(s);
+  };
+  // Texto de una alternativa (usa la misma lógica que el panel de respuestas)
+  const textoAlt = (ops, v) => {
+    let t = '';
+    try { t = respuestaTexto({ tipo: 'alternativas', opciones: ops || [] }, { respuesta: v }); } catch (_) { /* se muestra el valor tal cual */ }
+    return String(t || v || '');
+  };
+  const resAlt = (ops, v, corr) => {
+    const vv = String(v == null ? '' : v).trim();
+    if (!vv) return '<i>(sin respuesta)</i>';
+    const cc = String(corr == null ? '' : corr).trim();
+    const ok = cc !== '' && vv === cc;
+    return 'Respondió: <b>' + esc(textoAlt(ops, v)) + '</b> — ' + (ok ? '<span style="color:#15803d"><b>Correcta</b></span>'
+      : '<span style="color:#b91c1c"><b>Incorrecta</b></span>' + (cc !== '' ? ' (alternativa correcta: ' + esc(textoAlt(ops, corr)) + ')' : ''));
+  };
+  const tablaRubrica = (rubrica, niv) => {
+    if (!rubrica || !rubrica.length || !Array.isArray(niv)) return '';
+    return `<table style="width:100%;border-collapse:collapse;margin-top:4px"><tr><th style="${TH}">Criterio de la rúbrica</th><th style="${TH};width:28%">Nivel alcanzado</th></tr>` +
+      rubrica.map((c, i) => `<tr><td style="${TD}">${esc(c.criterio)}</td><td style="${TD}">${esc(ETIQ_NIVEL[niv[i]] || '–')}</td></tr>`).join('') + '</table>';
+  };
+  // Bloque con la respuesta completa de un estudiante a una actividad
+  function bloqueRespuestaPDF(a, r, fotos, num) {
+    const ev = jsonSeguro(r.evaluacion, {}) || {};
+    const im = id => fotos[id] ? `<img src="${fotos[id]}" style="max-height:170px;max-width:48%;margin:3px 6px 3px 0;border-radius:4px">` : '';
+    const T = TIPOS[a.tipo] || TIPOS.desarrollo;
+    let cuerpo;
+    if (esSinResp(r)) {
+      cuerpo = '<p style="margin:5px 0"><i>Sin respuesta del estudiante (evaluada por el docente).</i></p>';
+    } else if (a.tipo === 'grupo') {
+      const resp = jsonSeguro(r.respuesta, {}) || {}, fot = jsonSeguro(r.fotos, {}) || {};
+      cuerpo = (a.partes || []).map((p, i) => {
+        let c;
+        if (p.tipo === 'alternativas') c = resAlt(p.opciones, resp[p.id], p.correcta);
+        else if (p.tipo === 'recorrido') c = esc(resp[p.id] || '(sin datos de recorrido)');
+        else {
+          const t = String(resp[p.id] || '').trim();
+          c = (t ? `<span style="white-space:pre-line">${esc(t)}</span>` : (p.tipo === 'foto' ? '' : '<i>(sin texto)</i>')) +
+            (fot[p.id] ? '<div>' + im(fot[p.id]) + '</div>' : (p.tipo === 'foto' ? '<div style="color:#b91c1c;font-size:10px">Sin fotografía.</div>' : ''));
+        }
+        return `<div style="margin:6px 0;padding-left:8px;border-left:3px solid #94a3b8"><div style="font-size:11px;color:#475569"><b>Parte ${i + 1}</b> (${esc(p.tipo)} · ${esc(p.puntaje)} pt)${p.enunciado ? ': ' + esc(p.enunciado) : ''}</div>
+          <div style="margin-top:2px">${c}</div>${tablaRubrica(p.rubrica, ev[p.id])}</div>`;
+      }).join('');
+    } else if (a.tipo === 'alternativas') {
+      cuerpo = `<div style="margin:5px 0">${resAlt(a.opciones, r.respuesta, a.correcta)}</div>`;
+    } else {
+      const t = String(r.respuesta || '').trim(), ids = idsFotosResp(r);
+      cuerpo = `<p style="margin:5px 0;white-space:pre-line">${t ? esc(t) : (a.tipo === 'foto' ? '' : '<i>(sin texto)</i>')}</p>` +
+        (ids.length ? '<div>' + ids.map(im).join('') + '</div>' : '') + tablaRubrica(a.rubrica, ev.main);
+    }
+    const amb = jsonSeguro(r.ambiente, null);
+    const tiene = v => v !== '' && v != null;
+    const ubic = tiene(r.lat) && tiene(r.lng) ? 'Ubicación: ' + Number(r.lat).toFixed(5) + ', ' + Number(r.lng).toFixed(5) + (tiene(r.precision_m) ? ' (±' + r.precision_m + ' m)' : '') : '';
+    const meta = [(r.timestamp_cliente || r.timestamp_servidor) ? 'Respondida: ' + fechaCorta(r.timestamp_cliente || r.timestamp_servidor) : '', ubic,
+      amb && amb.t !== undefined ? 'Condiciones: ' + fmtClima(amb) : ''].filter(Boolean).join(' · ');
+    return `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin-bottom:8px">
+      <div><b>${num}. ${esc(a.titulo)}</b> <span style="color:#64748b">(${esc(T.nom)} · ${esc(a.puntaje_max)} pt)</span></div>
+      ${a.enunciado ? `<div style="font-size:11px;color:#475569;white-space:pre-line;margin:3px 0"><i>${esc(a.enunciado)}</i></div>` : ''}
+      ${cuerpo}
+      ${meta ? `<div style="font-size:10px;color:#64748b;margin-top:3px">${meta}</div>` : ''}
+      <p style="margin:5px 0 0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) + ' de ' + esc(a.puntaje_max) : 'Por evaluar'}${r.retro_docente ? ` · <b>Observación del docente:</b> ${esc(r.retro_docente)}` : ''}</p></div>`;
+  }
 
   reporteIndividual = async function (key) {
     const d = calcularEstudiantes().find(x => x.key === key);
@@ -1248,10 +1492,14 @@ if (typeof accionDocente === 'function') {
     try {
       const logo = S.insignia || await cargarInsignia();
       const acts = S.panel.actividades;
+      const fc = firmaDe(key);
+      const ids = new Set();
+      d.rs.forEach(r => idsFotosResp(r).forEach(i => ids.add(i)));
+      if (fc && fc.firma_id) ids.add(fc.firma_id);
       const fotos = {};
-      for (const r of d.rs) for (const fid of fotosDe(r)) fotos[fid] = await dataUrlArchivo(fid).catch(() => null);
+      let k = 0;
+      for (const id of ids) { cargando(true, 'Cargando imágenes (' + (++k) + '/' + ids.size + ')…'); fotos[id] = await dataUrlArchivo(id).catch(() => null); }
       const maxTotal = acts.reduce((s, a) => s + Number(a.puntaje_max || 0), 0);
-      const imgs = (r, alto) => fotosDe(r).filter(id => fotos[id]).map(id => `<img src="${fotos[id]}" style="max-height:${alto}px;max-width:32%;margin:2px 4px 2px 0;border-radius:4px">`).join('');
       let sec = 0;
       const nSec = () => sec++;
       const filas = acts.map((a, i) => {
@@ -1261,16 +1509,14 @@ if (typeof accionDocente === 'function') {
           <td style="${TD}">${r ? (r.estado === 'evaluada' ? 'Evaluada' : 'Por evaluar') : 'Sin responder'}</td>
           <td style="${TD};text-align:center">${r && r.estado === 'evaluada' ? esc(r.puntaje_final) : '–'} / ${esc(a.puntaje_max)}</td></tr>`;
       }).join('');
-      const detalle = acts.filter(a => !esRec(a)).map(a => {
+      // Todas las respuestas del estudiante (los recorridos con datos van en su propia sección)
+      const bloques = acts.map((a, i) => {
         const r = d.rs.find(x => x.actividad_id === a.id);
-        if (!r) return '';
-        return `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin-bottom:8px">
-          <b>${esc(a.titulo)}</b> <span style="color:#64748b">(${esc((TIPOS[a.tipo] || TIPOS.desarrollo).nom)} · ${esc(a.puntaje_max)} pt)</span>
-          <p style="margin:5px 0;white-space:pre-line">${esSinResp(r) ? '<i>Sin respuesta del estudiante (evaluada por el docente)</i>' : (esc(respuestaTexto(a, r)) || '<i>(solo fotografía)</i>')}</p>${imgs(r, 150)}
-          <p style="margin:5px 0 0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) : 'Por evaluar'}${r.retro_docente ? ` · <b>Observación del docente:</b> ${esc(r.retro_docente)}` : ''}</p></div>`;
+        if (!r || (esRec(a) && recDe(r))) return '';
+        return bloqueRespuestaPDF(a, r, fotos, i + 1);
       }).join('');
       const recs = d.rs.map(r => ({ r, a: actPor(r.actividad_id) })).filter(x => esRec(x.a) && recDe(x.r));
-      let html = encabezadoPDF('Informe individual de salida a terreno', 'Resultados, recorridos y registro de actividades', logo);
+      let html = encabezadoPDF('Informe individual de salida a terreno', 'Resultados, respuestas, recorridos y carta de compromiso', logo);
       html += tituloPDF(nSec(), 'Identificación del estudiante') + `<table style="width:100%;border-collapse:collapse">
         <tr><td style="${TH};width:18%">Estudiante</td><td style="${TD}">${esc(d.est.nombre)}</td><td style="${TH};width:12%">RUT</td><td style="${TD}">${esc(d.est.rut)}</td></tr>
         <tr><td style="${TH}">Curso</td><td style="${TD}">${esc(d.est.curso)}</td><td style="${TH}">Carta de compromiso</td><td style="${TD}">${d.firma ? 'Firmada' : 'Sin firmar'}</td></tr></table>`;
@@ -1281,24 +1527,30 @@ if (typeof accionDocente === 'function') {
         <tr><td style="${TH}">Escala de notas</td><td style="${TD}">1,0 a 7,0 con ${EXIGENCIA} % de exigencia (el ${EXIGENCIA} % de logro equivale a 4,0)</td></tr>
         <tr><td style="${TH}">Nota final</td><td style="${TD};font-size:15px"><b>${nf(d.nota)}</b>${d.ajustada ? ' (ajustada por el docente; nota calculada: ' + nf(d.notaCalc) + ')' : ''}${d.porEvaluar ? ' · provisoria, hay respuestas por evaluar' : ''}</td></tr></table>`;
       html += tituloPDF(nSec(), 'Detalle por actividad') + `<table style="width:100%;border-collapse:collapse"><tr><th style="${TH};width:6%">N°</th><th style="${TH}">Actividad</th><th style="${TH};width:16%">Tipo</th><th style="${TH};width:15%">Estado</th><th style="${TH};width:14%">Puntaje</th></tr>${filas}</table>`;
-      if (detalle) html += `<div style="font-weight:bold;margin:10px 0 4px">Respuestas y observaciones</div>${detalle}`;
+      if (bloques) html += tituloPDF(nSec(), 'Respuestas del estudiante') + bloques;
       if (recs.length) {
         html += tituloPDF(nSec(), 'Recorridos realizados') + `<table style="width:100%;border-collapse:collapse"><tr>
           <th style="${TH}">Recorridos</th><th style="${TH}">Distancia total</th><th style="${TH}">En movimiento</th><th style="${TH}">Subida</th><th style="${TH}">Bajada</th><th style="${TH}">Calorías (aprox.)</th></tr>
           <tr><td style="${TD}">${d.rec.n}</td><td style="${TD}">${fmtKm(d.rec.dist)}</td><td style="${TD}">${fmtDur(d.rec.mov)}</td><td style="${TD}">+${Math.round(d.rec.sub)} m</td><td style="${TD}">−${Math.round(d.rec.baj)} m</td><td style="${TD}">≈ ${Math.round(d.rec.kcal)} kcal</td></tr></table>`;
         recs.forEach(({ r, a }) => {
-          const rec = recDe(r), fot = jsonSeguro(r.fotos, {});
+          const rec = recDe(r), fot = jsonSeguro(r.fotos, {}), ev = jsonSeguro(r.evaluacion, {}) || {};
+          const ptsTxt = ev.rec_pts ? '<div style="font-size:11px;margin-top:4px"><b>Puntaje por parte:</b> ' +
+            (a.partes || []).map(p => esc(p.enunciado) + ': ' + (ev.rec_pts[p.id] != null ? ev.rec_pts[p.id] : 0) + '/' + ptsParte(p)).join(' · ') + '</div>' : '';
           html += `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;margin:8px 0"><b>${esc(a.titulo)}</b> · ${fmtKm(rec.dist)} · ${fmtDur(rec.dur)} · +${rec.sub} m / −${rec.baj} m · ≈ ${rec.kcal} kcal
             <div style="margin-top:6px">${svgRutaRec(rec)}</div><div style="margin-top:6px">${svgPerfil(rec)}</div><div style="margin-top:6px">` +
             hitosDe(a).map((hh, i) => {
               const u = fot[hh.id] && fotos[fot[hh.id]], x = rec.hitos[hh.id];
               return u ? `<span style="display:inline-block;width:32%;margin-right:1%;vertical-align:top;font-size:10px"><img src="${u}" style="width:100%;max-height:120px;object-fit:cover;border-radius:4px"><br>${i + 1}. ${esc(hh.enunciado)}${x && x.a != null ? ' · ' + x.a + ' m' : ''}${x && x.dp != null ? ' · a ' + fmtDist(x.dp) + ' del lugar' : ''}</span>` : '';
-            }).join('') + `</div>${rec.amb0 ? `<div style="font-size:10px;color:#475569;margin-top:4px">Condiciones al iniciar: ${fmtClima(rec.amb0)} (modelo Open-Meteo)</div>` : ''}</div>`;
+            }).join('') + `</div>${rec.amb0 ? `<div style="font-size:10px;color:#475569;margin-top:4px">Condiciones al iniciar: ${fmtClima(rec.amb0)} (modelo Open-Meteo)</div>` : ''}${ptsTxt}
+            <p style="margin:5px 0 0"><b>Puntaje:</b> ${r.estado === 'evaluada' ? esc(r.puntaje_final) + ' de ' + esc(a.puntaje_max) : 'Por evaluar'}${r.retro_docente ? ` · <b>Observación del docente:</b> ${esc(r.retro_docente)}` : ''}</p></div>`;
         });
         html += '<div style="font-size:10px;color:#64748b">Las calorías son un cálculo aproximado según distancia, tiempo y desnivel. Las alturas provienen del modelo digital de elevación o del GPS del teléfono.</div>';
       }
-      const resp = d.rs.map(r => ({ lat: r.lat, lng: r.lng, n: acts.findIndex(a => a.id === r.actividad_id) + 1 }));
-      html += tituloPDF(nSec(), 'Ubicaciones registradas') + svgMapa(resp, S.panel.puntos) + firmaPDF();
+      html += tituloPDF(nSec(), 'Carta de compromiso firmada') + (fc
+        ? `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:6px;padding:8px">${cuerpoCartaHTML(fc, fc.firma_id ? fotos[fc.firma_id] : null)}</div>`
+        : '<p style="font-size:11px">El estudiante aún no firma la carta de compromiso.</p>');
+      const ubicaciones = d.rs.map(r => ({ lat: r.lat, lng: r.lng, n: acts.findIndex(a => a.id === r.actividad_id) + 1 }));
+      html += tituloPDF(nSec(), 'Ubicaciones registradas') + svgMapa(ubicaciones, S.panel.puntos) + firmaPDF();
       await html2pdf().set(PDF_OPC('Informe_' + d.est.nombre.replace(/\s+/g, '_') + '.pdf')).from(envoltura(html), 'string').save();
     } catch (e) { aviso('No se pudo generar el informe: ' + e.message, 'error'); }
     finally { cargando(false); }
