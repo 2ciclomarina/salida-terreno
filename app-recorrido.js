@@ -4,6 +4,7 @@
    Kilómetros · calorías · ruta con alturas · fotos en los momentos indicados
    Pestañas de recorridos · barra de avance · informes formales (PDF)
    Lista de estudiantes · evaluación de quienes no enviaron nada
+   Evaluación manual de recorridos · docentes ayudantes
    Se carga después de app-extra.js (y de app-docente.js en el panel docente)
    ========================================================= */
 
@@ -22,6 +23,94 @@ const r5 = x => Math.round(x * 1e5) / 1e5;
 const claveRec = a => 'rec:' + S.usuario.key + ':' + a.id;
 const pinIcon = n => L.divIcon({ className: '', html: '<div class="pin">' + n + '</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
 const esSinResp = r => String((r && r.client_id) || '').indexOf('doc-') === 0;   // evaluada por el docente sin respuesta
+
+/* ---------- Nivel de acceso del docente (titular o ayudante) ---------- */
+const esTitular = () => !(typeof S !== 'undefined' && S && S.panel && S.panel.yo && S.panel.yo.nivel === 'ayudante');
+const ACC_SOLO_TITULAR = /^(editar-nota|editar-carta|est-|ay-|importar|insignia|nomina|elim|borr|del)/i;
+// Los ayudantes no pueden usar estas acciones (el servidor también las rechaza)
+document.addEventListener('click', e => {
+  if (esTitular()) return;
+  const b = e.target.closest('[data-accion]');
+  if (b && ACC_SOLO_TITULAR.test(b.dataset.accion)) {
+    e.stopImmediatePropagation(); e.preventDefault();
+    aviso('Esta acción la puede hacer solo el docente titular.', 'error');
+  }
+}, true);
+
+/* ---------- Evaluación manual de un recorrido (puntaje por parte) ---------- */
+const partesRecDe = a => (a.partes || []);
+const ptsParte = p => Number(p.puntaje) || 1;
+function sugeridoRec(r, a) {
+  const rec = recDe(r), fot = jsonSeguro(r.fotos, {}), o = {};
+  partesRecDe(a).forEach(p => {
+    if (p.tipo === 'recorrido') o[p.id] = rec ? ptsParte(p) : 0;
+    else o[p.id] = fot[p.id] ? ptsParte(p) : 0;
+  });
+  return o;
+}
+function repartirPts(total, a) {
+  let resto = Number(total) || 0;
+  const o = {};
+  partesRecDe(a).forEach(p => {
+    const v = Math.min(ptsParte(p), Math.max(0, resto));
+    o[p.id] = Math.round(v * 10) / 10; resto -= v;
+  });
+  return o;
+}
+function ptsRecInicial(r, a) {
+  const ev = jsonSeguro(r.evaluacion, {}) || {};
+  if (ev.rec_pts && typeof ev.rec_pts === 'object') return { pts: ev.rec_pts, nota: '' };
+  if (r.estado === 'evaluada' && r.puntaje_final !== '' && r.puntaje_final != null) {
+    return { pts: repartirPts(r.puntaje_final, a), nota: 'Puntaje guardado antes sin detalle por parte: se repartió en orden. Puede ajustarlo.' };
+  }
+  return { pts: sugeridoRec(r, a), nota: 'Propuesta según lo que el estudiante envió. Aún no está guardada.' };
+}
+function sumarRecPts(card) {
+  let t = 0;
+  card.querySelectorAll('[data-rp]').forEach(inp => {
+    const max = Number(inp.dataset.max) || 0;
+    let v = parseFloat(String(inp.value).replace(',', '.'));
+    if (!isFinite(v)) v = 0;
+    t += Math.min(max, Math.max(0, v));
+  });
+  const el = card.querySelector('[data-rtotal]');
+  if (el) el.textContent = (Math.round(t * 10) / 10).toString().replace('.', ',');
+}
+function llenarRecPts(id) {
+  const r = S.panel.respuestas.find(x => x.id === id), a = r && actPor(r.actividad_id), card = $('#ev-' + id);
+  if (!r || !a || !card) return;
+  const sug = sugeridoRec(r, a);
+  card.querySelectorAll('[data-rp]').forEach(inp => { inp.value = sug[inp.dataset.rp] != null ? sug[inp.dataset.rp] : 0; });
+  sumarRecPts(card);
+}
+async function guardarRecEval(id) {
+  const r = S.panel.respuestas.find(x => x.id === id), a = r && actPor(r.actividad_id), card = $('#ev-' + id);
+  if (!r || !a || !card) return;
+  const pts = {};
+  let total = 0;
+  card.querySelectorAll('[data-rp]').forEach(inp => {
+    const max = Number(inp.dataset.max) || 0;
+    let v = parseFloat(String(inp.value).replace(',', '.'));
+    if (!isFinite(v)) v = 0;
+    v = Math.round(Math.min(max, Math.max(0, v)) * 10) / 10;
+    pts[inp.dataset.rp] = v; total += v;
+  });
+  total = Math.round(total * 10) / 10;
+  const retro = String((card.querySelector('[data-rretro]') || {}).value || '').trim();
+  cargando(true, 'Guardando la evaluación…');
+  try {
+    const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: total, retro, evaluacion: { rec_pts: pts } });
+    r.puntaje_final = d.puntaje_final; r.estado = 'evaluada'; r.retro_docente = retro;
+    r.evaluacion = JSON.stringify({ rec_pts: pts }); r.evaluador = d.evaluador || r.evaluador;
+  } finally { cargando(false); }
+  redibujar();
+  aviso('Evaluación guardada: ' + total.toString().replace('.', ',') + ' de ' + a.puntaje_max + ' pt.');
+}
+// Total en vivo al escribir un puntaje
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t && t.dataset && t.dataset.rp !== undefined) { const c = t.closest('article'); if (c) sumarRecPts(c); }
+});
 
 // Gasto energético aproximado al caminar (ecuación ACSM: depende de la velocidad y la pendiente)
 function kcalEstim(d, movS, sub, peso) {
@@ -923,6 +1012,70 @@ if (typeof accionDocente === 'function') {
     } catch (err) { cargando(false); aviso(err.message, 'error'); }
   }
 
+  /* --- Docentes ayudantes (solo el docente titular) --- */
+  function renderAyudantesDoc() {
+    const l = S.panel.ayudantes || [];
+    $('#doc-contenido').innerHTML = `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">
+      <div class="flex flex-wrap items-center gap-2"><h3 class="font-bold text-lg flex-1">🤝 Docentes ayudantes <span class="text-sm font-normal text-slate-500">(${l.length})</span></h3>
+        <button data-accion="ay-nuevo" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl shadow">+ Agregar ayudante</button></div>
+      <div class="grid sm:grid-cols-2 gap-3 text-sm">
+        <div class="rounded-xl bg-emerald-50 p-3"><b>Pueden:</b><br>crear y editar actividades, recorridos, lugares, fichas y la presentación; subir imágenes; revisar y evaluar respuestas (también con la IA); ver los reportes.</div>
+        <div class="rounded-xl bg-rose-50 p-3"><b>No pueden:</b><br>eliminar actividades ni lugares; cambiar la carta, la nómina o el escudo; editar, desactivar o eliminar estudiantes; modificar las notas finales; administrar ayudantes.</div></div>
+      ${l.length ? l.map(a => `<div class="flex flex-wrap items-center gap-2 border-t py-2">
+        <div class="flex-1 min-w-[12rem]"><div class="font-semibold">${esc(a.nombre)}</div><div class="text-xs text-slate-500">Creado el ${fechaCorta(a.creado)}</div></div>
+        ${a.activo ? chip('Activo', 'emerald') : chip('Inactivo', 'slate')}
+        <button data-accion="ay-editar" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm">✏️ Editar</button>
+        <button data-accion="ay-activar" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 text-sm">${a.activo ? 'Desactivar' : 'Activar'}</button>
+        <button data-accion="ay-eliminar" data-id="${esc(a.id)}" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-sm" aria-label="Eliminar">🗑️</button></div>`).join('')
+        : '<p class="text-sm text-slate-500 py-3">Aún no hay ayudantes. Agregue uno con su nombre y una clave.</p>'}
+      <p class="text-xs text-slate-500">Cada ayudante ingresa desde la misma pantalla «Docente», con <b>su propia clave</b> (no con la suya). Si lo desactiva o lo elimina, pierde el acceso de inmediato. Puede tener hasta 10.</p></div>`;
+  }
+  function formAyudante(id) {
+    const ay = id ? (S.panel.ayudantes || []).find(x => x.id === id) : null;
+    modal(`<form id="f-ay" class="space-y-3 pt-2">
+      <h3 class="text-lg font-extrabold pr-6">${ay ? '✏️ Editar ayudante' : '+ Agregar ayudante'}</h3>
+      <label class="block text-sm font-semibold">Nombre<input name="nombre" required class="${INPR} mt-1" placeholder="Ej: Prof. María González" value="${esc(ay ? ay.nombre : '')}"></label>
+      <label class="block text-sm font-semibold">${ay ? 'Nueva clave (déjela vacía para no cambiarla)' : 'Clave de ingreso (mínimo 6 caracteres)'}
+        <div class="flex gap-2 mt-1"><input name="clave" ${ay ? '' : 'required'} autocomplete="off" class="${INPR} flex-1" placeholder="${ay ? '' : 'Escriba una clave'}">
+          <button type="button" id="ay-gen" class="px-3 py-2 rounded-xl bg-slate-100 text-sm font-semibold">Generar</button></div></label>
+      <p class="text-xs text-slate-500">Entréguele la clave solo a esa persona. Por seguridad no se puede volver a ver: si la olvida, ponga una nueva.</p>
+      <button class="w-full bg-teal-700 text-white font-bold py-3 rounded-2xl shadow">Guardar</button></form>`);
+    const f = $('#f-ay');
+    $('#ay-gen').onclick = () => {
+      const c = 'abcdefghjkmnpqrstuvwxyz23456789';
+      let s = '';
+      for (let i = 0; i < 8; i++) s += c[Math.floor(Math.random() * c.length)];
+      f.clave.value = s;
+    };
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      cargando(true, 'Guardando…');
+      try {
+        await api('guardarAyudante', { id: ay ? ay.id : '', nombre: f.nombre.value.trim(), clave: f.clave.value, activo: ay ? (ay.activo ? 'si' : 'no') : 'si' });
+        cerrarModal(); await cargarPanel(); renderDocente(); aviso(ay ? 'Ayudante actualizado.' : 'Ayudante agregado. Entréguele su clave.');
+      } catch (err) { cargando(false); aviso(err.message, 'error'); }
+    };
+  }
+  async function cambiarActivoAy(id) {
+    const ay = (S.panel.ayudantes || []).find(x => x.id === id);
+    if (!ay) return;
+    if (ay.activo && !confirm('¿Desactivar a ' + ay.nombre + '? Perderá el acceso de inmediato.')) return;
+    cargando(true, 'Guardando…');
+    try {
+      await api('guardarAyudante', { id: ay.id, nombre: ay.nombre, clave: '', activo: ay.activo ? 'no' : 'si' });
+      await cargarPanel(); renderDocente(); aviso(ay.activo ? 'Ayudante desactivado.' : 'Ayudante activado.');
+    } catch (err) { cargando(false); aviso(err.message, 'error'); }
+  }
+  async function eliminarAy(id) {
+    const ay = (S.panel.ayudantes || []).find(x => x.id === id);
+    if (!ay || !confirm('¿Eliminar a ' + ay.nombre + '? Perderá el acceso de inmediato. Lo que subió y evaluó se conserva.')) return;
+    cargando(true, 'Eliminando…');
+    try {
+      await api('eliminarAyudante', { id });
+      await cargarPanel(); renderDocente(); aviso('Ayudante eliminado.');
+    } catch (err) { cargando(false); aviso(err.message, 'error'); }
+  }
+
   // Acciones del panel que maneja este archivo
   const _accionDocenteRec = accionDocente;
   accionDocente = async function (a, b, id) {
@@ -933,6 +1086,10 @@ if (typeof accionDocente === 'function') {
     if (a === 'est-editar') return formEstudiante(b.dataset.rut);
     if (a === 'est-activar') return cambiarActivo(b.dataset.rut);
     if (a === 'est-eliminar') return eliminarEst(b.dataset.rut);
+    if (a === 'ay-nuevo') return formAyudante();
+    if (a === 'ay-editar') return formAyudante(id);
+    if (a === 'ay-activar') return cambiarActivoAy(id);
+    if (a === 'ay-eliminar') return eliminarAy(id);
     return _accionDocenteRec(a, b, id);
   };
   const _renderActividadesRec = renderActividades;
@@ -947,9 +1104,10 @@ if (typeof accionDocente === 'function') {
     });
   };
 
-  /* --- Pestañas «Recorridos» y «Estudiantes» del docente --- */
+  /* --- Pestañas «Recorridos», «Estudiantes» y «Ayudantes» del docente --- */
   if (!TABS_DOC.some(t => t[0] === 'recorridos')) TABS_DOC.splice(4, 0, ['recorridos', '🥾 Recorridos']);
   if (!TABS_DOC.some(t => t[0] === 'estudiantes')) TABS_DOC.splice(TABS_DOC.findIndex(t => t[0] === 'recorridos') + 1, 0, ['estudiantes', '👥 Estudiantes']);
+  if (!TABS_DOC.some(t => t[0] === 'ayudantes')) TABS_DOC.splice(TABS_DOC.findIndex(t => t[0] === 'estudiantes') + 1, 0, ['ayudantes', '🤝 Ayudantes']);
   function renderRecorridosDoc() {
     const est = calcularEstudiantes(), T = totalesRec(est);
     const kpi = (t, v) => `<div class="rounded-2xl bg-white/95 shadow p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
@@ -971,20 +1129,30 @@ if (typeof accionDocente === 'function') {
       <p class="text-xs text-slate-400 mt-3">Las calorías son un cálculo aproximado. Estos totales también quedan en los informes y en el CSV.</p>`;
   }
   renderDocente = function () {
+    const titular = esTitular();
+    const ocultas = titular ? [] : ['estudiantes', 'ayudantes', 'ajustes'];
+    if (ocultas.indexOf(S.tabDoc) >= 0) S.tabDoc = 'resumen';
+    const tabs = TABS_DOC.filter(t => ocultas.indexOf(t[0]) < 0);
     const porEvaluar = S.panel.respuestas.filter(r => r.estado !== 'evaluada').length;
-    $('#doc-tabs').innerHTML = TABS_DOC.map(([k, t]) =>
+    $('#doc-tabs').innerHTML = tabs.map(([k, t]) =>
       `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}${k === 'respuestas' && porEvaluar ? ` <span class="ml-1 text-xs bg-amber-400 text-slate-900 rounded-full px-1.5">${porEvaluar}</span>` : ''}</button>`).join('');
     detenerMapa();
-    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, estudiantes: renderEstudiantesDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
+    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, estudiantes: renderEstudiantesDoc, ayudantes: renderAyudantesDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
     f();
+    if (!titular) {
+      // El ayudante no ve los botones de eliminar ni de modificar notas
+      $$('#doc-contenido [data-accion]').forEach(b => { if (ACC_SOLO_TITULAR.test(b.dataset.accion)) b.remove(); });
+      $('#doc-contenido').insertAdjacentHTML('afterbegin', `<div class="rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-sm p-3 mb-3">🤝 Ingresó como ayudante: <b>${esc((S.panel.yo && S.panel.yo.nombre) || '')}</b>. Puede crear contenido y revisar respuestas; las demás opciones son del docente titular.</div>`);
+    }
   };
 
-  /* --- Respuestas de recorridos --- */
+  /* --- Respuestas de recorridos: evaluación manual por parte --- */
   function tarjetaRecDoc(r, a) {
     const rec = recDe(r), hs = hitosDe(a), fot = jsonSeguro(r.fotos, {});
     const nf = hs.filter(h => fot[h.id]).length;
-    const p0 = r.estado === 'evaluada' ? r.puntaje_final : (r.puntaje_final !== '' && r.puntaje_final != null ? r.puntaje_final : '');
     const lejos = rec ? hs.filter(h => rec.hitos[h.id] && rec.hitos[h.id].dp != null && rec.hitos[h.id].dp > 100).length : 0;
+    const ini = ptsRecInicial(r, a);
+    const total = partesRecDe(a).reduce((s, p) => s + (Number(ini.pts[p.id]) || 0), 0);
     return `<article id="ev-${esc(r.id)}" class="bg-white/95 rounded-2xl shadow p-4 space-y-2">
       <div class="flex justify-between gap-2 items-start"><div><b>${esc(nombreDe(r.rut))}</b><div class="text-xs text-slate-400">${fechaCorta(r.timestamp_cliente || r.timestamp_servidor)}</div></div>
         ${r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Por evaluar', 'amber')}</div>
@@ -994,12 +1162,23 @@ if (typeof accionDocente === 'function') {
       ${rec && rec.amb0 ? `<p class="text-xs text-slate-600">🌍 Al iniciar: ${fmtClima(rec.amb0)}</p>` : ''}
       ${rec ? `<button data-accion="rec-ver" data-id="${esc(r.id)}" data-doc="1" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-semibold">🗺️ Ver recorrido, alturas y fotos</button>` : ''}
       ${enlacesUbicacion(r)}
-      <div class="flex flex-wrap gap-2 items-start">
-        <input data-campo="puntaje" type="number" step="0.1" min="0" max="${esc(a.puntaje_max)}" value="${esc(p0)}" placeholder="Pts" class="border rounded-xl px-3 py-2 w-24">
-        <textarea data-campo="retro" rows="2" placeholder="Comentario breve para el estudiante" class="border rounded-xl px-3 py-2 flex-1 min-w-[12rem]">${esc(r.retro_docente || '')}</textarea></div>
+      <div class="rounded-xl border p-2 space-y-1">
+        <div class="text-xs font-semibold text-slate-600">Puntaje por parte</div>
+        ${partesRecDe(a).map(p => {
+          const max = ptsParte(p), v = ini.pts[p.id] != null ? ini.pts[p.id] : 0;
+          const marca = p.tipo === 'foto' ? (fot[p.id] ? ' ✔' : ' (sin foto)') : (rec ? ' ✔' : ' (sin recorrido)');
+          return `<label class="flex items-center gap-2 text-sm"><span class="flex-1 min-w-0">${p.tipo === 'recorrido' ? '🥾 ' : '📷 '}${esc(p.enunciado)}${marca}</span>
+            <input data-rp="${esc(p.id)}" data-max="${max}" type="number" step="0.1" min="0" max="${max}" value="${esc(v)}" class="border rounded-xl px-2 py-1 w-20 text-right">
+            <span class="text-xs text-slate-500 w-10">/ ${max}</span></label>`;
+        }).join('')}
+        <div class="flex justify-between border-t pt-1 text-sm font-bold"><span>Total</span><span><span data-rtotal>${(Math.round(total * 10) / 10).toString().replace('.', ',')}</span> / ${esc(a.puntaje_max)} pt</span></div>
+        ${ini.nota ? `<p class="text-[11px] text-slate-400">${esc(ini.nota)}</p>` : ''}</div>
+      <textarea data-rretro rows="2" placeholder="Comentario breve para el estudiante" class="border rounded-xl px-3 py-2 w-full">${esc(r.retro_docente || '')}</textarea>
+      ${r.estado === 'evaluada' && r.evaluador ? `<p class="text-[11px] text-slate-400">Evaluado por: ${esc(r.evaluador)}</p>` : ''}
       <div class="flex flex-wrap gap-2">
+        <button data-accion="rec-sugerir" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm font-semibold">📷 Según lo enviado</button>
         <button data-accion="rec-aprobar" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">✔ Puntaje completo (${esc(a.puntaje_max)})</button>
-        <button data-accion="guardar-eval" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button></div></article>`;
+        <button data-accion="rec-guardar" data-id="${esc(r.id)}" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-sm font-semibold">Guardar mi evaluación</button></div></article>`;
   }
   const _tarjetaRespRec = tarjetaResp;
   tarjetaResp = function (r, a) {
@@ -1203,6 +1382,8 @@ document.addEventListener('click', async e => {
       case 'rec-enviar': return await enviarRec();
       case 'rec-descartar': return await descartarRec();
       case 'rec-ver': return verRec(id, b.dataset.doc);
+      case 'rec-sugerir': return llenarRecPts(id);
+      case 'rec-guardar': return await guardarRecEval(id);
       case 'rec-aprobar': return typeof aprobarRec === 'function' ? await aprobarRec(id) : undefined;
       case 'rec-aprobar-todos': return typeof aprobarTodosRec === 'function' ? await aprobarTodosRec() : undefined;
     }
