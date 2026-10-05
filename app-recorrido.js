@@ -2,6 +2,7 @@
 /* =========================================================
    SALIDA A TERRENO – Complementos, Parte 2: Recorrido
    Kilómetros · calorías · ruta con alturas · fotos en los momentos indicados
+   Pestañas de recorridos · barra de avance · informes formales (PDF)
    Se carga después de app-extra.js (y de app-docente.js en el panel docente)
    ========================================================= */
 
@@ -94,6 +95,31 @@ api = async function (accion, datos, op) {
   return _apiRec(accion, datos, op);
 };
 
+/* ---------- Mapas: se vuelve a encuadrar cuando el mapa ya tiene su tamaño ---------- */
+crearMapa = function (idDiv, puntos, op) {
+  op = op || {};
+  detenerMapa();
+  const c = capasBase();
+  const m = L.map(idDiv, { layers: [c.topo] });
+  L.control.layers({ 'Topográfico (relieve)': c.topo, 'Topográfico Esri': c.esri, 'Calles': c.osm }).addTo(m);
+  const lim = L.latLngBounds([]), marcas = {};
+  puntos.forEach((p, i) => {
+    if (!isFinite(p.lat) || !isFinite(p.lng)) return;
+    const mk = L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="pin">${i + 1}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }) })
+      .addTo(m).bindPopup(op.popup ? op.popup(p) : `<b>${esc(p.nombre)}</b><br>${esc(p.descripcion || '')}`);
+    marcas[p.id] = mk;
+    lim.extend([p.lat, p.lng]);
+  });
+  const ajustar = () => {
+    if (lim.isValid()) m.fitBounds(lim, { padding: [40, 40], maxZoom: 16 }); else m.setView([-36.83, -73.05], 12);
+    if (op.foco && marcas[op.foco]) { m.setView(marcas[op.foco].getLatLng(), 16); marcas[op.foco].openPopup(); }
+  };
+  ajustar();
+  S.mapa = m;
+  if (op.seguir) iniciarGPS();
+  setTimeout(() => { if (S.mapa === m) { m.invalidateSize(); ajustar(); } }, 300);
+};
+
 /* ---------- Pantalla del recorrido (cubre toda la ventana) ---------- */
 function overlay() {
   let o = $('#rec-overlay');
@@ -145,7 +171,7 @@ function svgPerfil(rec) {
     <text x="4" y="${(Y(amax) + 4).toFixed(1)}" font-size="10" fill="#475569">${Math.round(amax)} m</text><text x="4" y="${(Y(amin) + 4).toFixed(1)}" font-size="10" fill="#475569">${Math.round(amin)} m</text>
     <text x="${W - 70}" y="${H - 2}" font-size="10" fill="#475569">${fmtKm(dmax)}</text></svg>`;
 }
-// Ruta dibujada sin mapa de fondo (para los PDF)
+// Ruta dibujada sin mapa de fondo (para las pestañas y los PDF)
 function svgRutaRec(rec) {
   const p = rec.pts;
   if (p.length < 2) return '';
@@ -227,7 +253,8 @@ async function cargarPrevio() {
     m = nuevoMapa('rec-prev-mapa');
     L.circleMarker([p.lat, p.lng], { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(m).bindTooltip('Usted');
     L.marker([pt.lat, pt.lng], { icon: pinIcon(puntoNum(pt.id)) }).addTo(m).bindTooltip(pt.nombre);
-    m.fitBounds([[p.lat, p.lng], [pt.lat, pt.lng]], { padding: [30, 30], maxZoom: 16 });
+    const b = L.latLngBounds([[p.lat, p.lng], [pt.lat, pt.lng]]);
+    setTimeout(() => { if (MAPA === m) { m.invalidateSize(); m.fitBounds(b, { padding: [30, 30], maxZoom: 16 }); } }, 250);
   }
   const rr = await rutasHasta([p.lat, p.lng], [pt]);
   const r = rr[pt.id], i2 = $('#rec-prev-info');
@@ -310,8 +337,13 @@ function vistaActivo() {
   const a = REC.act, hs = hitosDe(a);
   return cabeceraRec('Recorrido en curso') + `<div class="p-4 space-y-3 max-w-2xl mx-auto">
     <div id="rec-gps" class="text-xs text-center text-slate-600">⏳ Buscando señal…</div>
-    <div class="grid grid-cols-3 gap-2">${celdaRec('📏', '–', 'Distancia', 'rec-km')}${celdaRec('⏱️', '–', 'Tiempo', 'rec-t')}${celdaRec('🔥', '–', 'Calorías aprox.', 'rec-kcal')}
-      ${celdaRec('⬆️', '–', 'Subida', 'rec-sub')}${celdaRec('⛰️', '–', 'Altura (GPS)', 'rec-alt')}${celdaRec('📷', '–', 'Fotografías', 'rec-fotos')}</div>
+    <div class="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 text-white p-4 shadow flex items-center gap-3">
+      <div class="text-4xl">🔥</div>
+      <div class="flex-1"><div class="text-xs opacity-90">Calorías gastadas (aproximado)</div>
+        <div id="rec-kcal" class="text-3xl font-extrabold leading-tight">0 kcal</div>
+        <div class="text-[11px] opacity-90">Empiezan a contar cuando camine unos 50 metros.</div></div></div>
+    <div class="grid grid-cols-3 gap-2">${celdaRec('📏', '–', 'Distancia', 'rec-km')}${celdaRec('⏱️', '–', 'Tiempo', 'rec-t')}${celdaRec('⬆️', '–', 'Subida', 'rec-sub')}
+      ${celdaRec('⛰️', '–', 'Altura (GPS)', 'rec-alt')}${celdaRec('📷', '–', 'Fotografías', 'rec-fotos')}</div>
     <div id="rec-mapa" class="h-56 rounded-2xl overflow-hidden border shadow" style="isolation:isolate"></div>
     ${hs.length ? `<div class="space-y-2">${hs.map((h, i) => {
       const x = REC.hitos[h.id];
@@ -466,8 +498,10 @@ function vistaRec(a, r, doc, pend) {
   </div>`;
   const m = nuevoMapa('rec-vmapa');
   const ll = rec.pts.map(p => [p[0], p[1]]);
-  if (ll.length > 1) { const pl = L.polyline(ll, { color: '#dc2626', weight: 4 }).addTo(m); m.fitBounds(pl.getBounds(), { padding: [30, 30] }); }
-  else if (ll.length) m.setView(ll[0], 16); else m.setView([-36.83, -73.05], 13);
+  const pl = ll.length > 1 ? L.polyline(ll, { color: '#dc2626', weight: 4 }).addTo(m) : null;
+  const encuadrar = () => { m.invalidateSize(); if (pl) m.fitBounds(pl.getBounds(), { padding: [30, 30] }); else if (ll.length) m.setView(ll[0], 16); else m.setView([-36.83, -73.05], 13); };
+  encuadrar();
+  setTimeout(() => { if (MAPA === m) encuadrar(); }, 300);
   if (ll.length) {
     L.circleMarker(ll[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#16a34a', fillOpacity: 1 }).addTo(m).bindTooltip('Inicio');
     L.circleMarker(ll[ll.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 }).addTo(m).bindTooltip('Término');
@@ -490,7 +524,7 @@ function verRec(id, doc) {
   if (a && r) vistaRec(a, r, false, false);
 }
 
-/* ---------- Estudiante: tarjeta de la actividad y totales ---------- */
+/* ---------- Estudiante: tarjeta de la actividad ---------- */
 function tarjetaRec(a) {
   const v = estadoVentana(a), r = respuestaDe(a), hs = hitosDe(a), T = TIPOS.recorrido;
   let est;
@@ -528,16 +562,85 @@ abrirResponder = async function (id) {
   return _abrirResponderRec(id);
 };
 
-// Totales del estudiante en su pantalla de inicio
+/* ---------- Estudiante: pestaña «Recorridos» ---------- */
+function totalesRecEst() {
+  const t = { n: 0, dist: 0, dur: 0, sub: 0, kcal: 0 };
+  (S.datos.actividades || []).filter(esRec).forEach(a => {
+    const r = respuestaDe(a), q = r ? recDe(r) : null;
+    if (q) { t.n++; t.dist += q.dist || 0; t.dur += q.dur || 0; t.sub += q.sub || 0; t.kcal += q.kcal || 0; }
+  });
+  return t;
+}
+function vistaMisRec() {
+  const acts = S.datos.actividades.filter(esRec), T = totalesRecEst();
+  const tile = (ic, v, t, cls) => `<div class="rounded-2xl ${cls || 'bg-white/20'} p-2 text-center"><div class="text-lg">${ic}</div><div class="font-extrabold text-sm">${v}</div><div class="text-[10px] opacity-90">${t}</div></div>`;
+  const cab = `<div class="rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white p-4 shadow-lg">
+    <div class="font-extrabold">🥾 Mis recorridos</div>
+    ${T.n ? `<div class="grid grid-cols-4 gap-2 mt-3">${tile('📏', fmtKm(T.dist), 'Distancia')}${tile('⏱️', fmtDur(T.dur), 'Tiempo')}${tile('⬆️', '+' + Math.round(T.sub) + ' m', 'Subida')}${tile('🔥', Math.round(T.kcal), 'kcal aprox.', 'bg-orange-500')}</div>
+      <div class="text-[11px] opacity-90 mt-2">${T.n} recorrido(s) terminado(s). Las calorías son un cálculo aproximado.</div>`
+      : '<div class="text-sm opacity-90 mt-1">Aún no ha terminado ningún recorrido. Cuando lo haga, aquí verá su camino, las fotografías y las calorías.</div>'}</div>`;
+  const tarjetas = acts.map(a => {
+    const r = respuestaDe(a), rec = r ? recDe(r) : null, v = estadoVentana(a);
+    if (!rec) return `<article class="bg-white/95 rounded-3xl shadow p-4 flex items-center gap-3"><div class="text-3xl">🥾</div>
+      <div class="flex-1 min-w-0"><div class="font-bold leading-tight">${esc(a.titulo)}</div><div class="text-xs text-slate-500">Aún no lo realiza</div></div>
+      ${v === 'abierta' ? `<button data-accion="responder" data-id="${esc(a.id)}" class="shrink-0 bg-teal-700 text-white font-bold px-4 py-2 rounded-xl text-sm">Abrir</button>` : chip(v === 'pronto' ? 'Aún no abre' : 'Cerrada', v === 'pronto' ? 'slate' : 'rose')}</article>`;
+    const loc = r.origen === 'local', fot = loc ? (r.fotosB64 || {}) : jsonSeguro(r.fotos, {});
+    const mini = hitosDe(a).filter(h => fot[h.id]).map(h => `<figure class="w-28 shrink-0">
+      ${loc ? `<img src="${fot[h.id]}" class="h-24 w-28 object-cover rounded-xl">` : `<img data-archivo="${esc(fot[h.id])}" data-zoom="1" class="h-24 w-28 object-cover rounded-xl bg-slate-100">`}
+      <figcaption class="text-[10px] text-slate-600 mt-0.5 leading-tight">${rec.hitos[h.id] ? rec.hitos[h.id].n + '. ' : ''}${esc(h.enunciado)}</figcaption></figure>`).join('');
+    return `<article class="bg-white/95 rounded-3xl shadow p-4 space-y-3">
+      <div class="flex items-start gap-2"><div class="flex-1 min-w-0"><div class="font-bold leading-tight">${esc(a.titulo)}</div><div class="text-xs text-slate-500">${fechaCorta(rec.ini)}</div></div>
+        ${loc ? chip('Por enviar', 'amber') : r.estado === 'evaluada' ? chip('Evaluada', 'emerald') : chip('Enviada', 'sky')}</div>
+      <div class="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 text-white p-3 flex items-center gap-3"><div class="text-3xl">🔥</div>
+        <div><div class="text-[11px] opacity-90">Calorías gastadas (aproximado)</div><div class="text-2xl font-extrabold leading-tight">${rec.kcal} kcal</div></div></div>
+      <div class="grid grid-cols-4 gap-2 text-center text-xs">${[['📏', fmtKm(rec.dist), 'Distancia'], ['⏱️', fmtDur(rec.dur), 'Duración'], ['⬆️', '+' + rec.sub + ' m', 'Subida'], ['⬇️', '−' + rec.baj + ' m', 'Bajada']]
+        .map(([ic, val, t]) => `<div class="rounded-xl bg-slate-50 p-2"><div>${ic}</div><div class="font-bold">${val}</div><div class="text-[10px] text-slate-500">${t}</div></div>`).join('')}</div>
+      <div><div class="text-xs font-semibold text-slate-600 mb-1">🗺️ Camino recorrido</div>${svgRutaRec(rec) || '<p class="text-xs text-slate-400">Sin trazado.</p>'}</div>
+      <div><div class="text-xs font-semibold text-slate-600 mb-1">⛰️ Perfil de alturas</div>${svgPerfil(rec)}</div>
+      ${mini ? `<div><div class="text-xs font-semibold text-slate-600 mb-1">📷 Fotografías en los puntos</div><div class="flex gap-2 overflow-x-auto pb-1">${mini}</div></div>` : ''}
+      <button data-accion="rec-ver" data-id="${esc(a.id)}" class="w-full bg-teal-700 text-white font-bold py-2.5 rounded-2xl">🗺️ Ver mapa interactivo y fotografías</button></article>`;
+  }).join('');
+  return cab + (tarjetas || '<div class="text-center text-slate-500 py-8 bg-white/80 rounded-2xl">No hay recorridos creados todavía.</div>');
+}
+// La pestaña solo aparece cuando hay al menos un recorrido creado
+renderTabsEst = function () {
+  const acts = S.datos.actividades, n = acts.filter(a => respuestaDe(a)).length;
+  const cnt = { pendientes: acts.length - n, realizadas: n, todas: acts.length };
+  const tabs = TABS_EST.slice();
+  if (acts.some(esRec)) tabs.splice(3, 0, ['recorridos', '🥾', 'Recorridos']);
+  else if (S.tab === 'recorridos') S.tab = 'pendientes';
+  const nav = $('#est-tabs');
+  nav.className = 'grid ' + (tabs.length > 4 ? 'grid-cols-5' : 'grid-cols-4') + ' gap-1 bg-white/95 rounded-2xl shadow p-1 text-xs font-semibold';
+  nav.innerHTML = tabs.map(([k, ic, t]) =>
+    `<button data-accion="tab-est" data-tab="${k}" class="py-2 rounded-xl flex flex-col items-center leading-tight ${S.tab === k ? 'tab-activa' : ''}">
+      <span class="text-lg">${ic}</span><span>${t}${cnt[k] !== undefined ? ' (' + cnt[k] + ')' : ''}</span></button>`).join('');
+};
+const _renderContenidoEstRec = renderContenidoEst;
+renderContenidoEst = function () {
+  const hayRec = (S.datos.actividades || []).some(esRec);
+  if (S.tab !== 'recorridos' || !hayRec) return _renderContenidoEstRec();
+  renderTabsEst(); detenerMapa();
+  $('#est-contenido').innerHTML = vistaMisRec();
+  pintarImagenes($('#est-contenido'));
+};
+
+/* ---------- Estudiante: barra de avance (verde fluorescente = realizadas, rojo = pendientes) ---------- */
+function barraAvance(acts) {
+  const n = acts.length;
+  if (!n) return '';
+  const h = acts.filter(a => respuestaDe(a)).length;
+  const seg = acts.map(a => respuestaDe(a)
+    ? '<div class="h-4 flex-1 rounded-md" style="background:#39ff14;box-shadow:0 0 8px #39ff14"></div>'
+    : '<div class="h-4 flex-1 rounded-md" style="background:#ef4444"></div>').join('');
+  return `<div><div class="flex gap-1">${seg}</div>
+    <div class="flex justify-between text-[11px] mt-1.5 font-semibold"><span><span style="color:#39ff14">●</span> Realizadas: ${h}</span><span><span style="color:#ff6b6b">●</span> Pendientes: ${n - h}</span></div></div>`;
+}
 const _renderEstudianteRec = renderEstudiante;
 renderEstudiante = function () {
   _renderEstudianteRec();
-  const t = { n: 0, dist: 0, sub: 0, kcal: 0 };
-  (S.datos.respuestas || []).forEach(r => {
-    const a = S.datos.actividades.find(x => x.id === r.actividad_id);
-    const q = esRec(a) ? recDe(r) : null;
-    if (q) { t.n++; t.dist += q.dist || 0; t.sub += q.sub || 0; t.kcal += q.kcal || 0; }
-  });
+  const barra = $('#est-info .rounded-full.overflow-hidden');
+  if (barra) barra.outerHTML = barraAvance(S.datos.actividades || []);
+  const t = totalesRecEst();
   const c = $('#est-info > div');
   if (t.n && c) c.insertAdjacentHTML('beforeend', `<div class="mt-3 text-xs bg-white/20 rounded-xl px-3 py-2">🥾 Sus recorridos: <b>${fmtKm(t.dist)}</b> · ⬆️ +${Math.round(t.sub)} m · 🔥 ≈ ${Math.round(t.kcal)} kcal</div>`);
 };
@@ -547,23 +650,25 @@ renderEstudiante = function () {
    ========================================================= */
 if (typeof accionDocente === 'function') {
   const INPR = 'w-full border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+  const DOCENTE_NOMBRE = 'Prof. Cristian Yáñez Reyes';   // nombre que firma los informes
+  const COLEGIO = 'Colegio Marina de Chile';
 
   // Totales de recorridos por estudiante
   const _calcularEstudiantesRec = calcularEstudiantes;
   calcularEstudiantes = function () {
     const r = _calcularEstudiantesRec();
     r.forEach(e => {
-      const t = { n: 0, dist: 0, mov: 0, sub: 0, kcal: 0 };
+      const t = { n: 0, dist: 0, mov: 0, dur: 0, sub: 0, baj: 0, kcal: 0 };
       e.rs.forEach(x => {
         const a = actPor(x.actividad_id);
         const q = esRec(a) ? recDe(x) : null;
-        if (q) { t.n++; t.dist += q.dist || 0; t.mov += q.mov || 0; t.sub += q.sub || 0; t.kcal += q.kcal || 0; }
+        if (q) { t.n++; t.dist += q.dist || 0; t.mov += q.mov || 0; t.dur += q.dur || 0; t.sub += q.sub || 0; t.baj += q.baj || 0; t.kcal += q.kcal || 0; }
       });
       e.rec = t;
     });
     return r;
   };
-  const totalesRec = est => est.reduce((t, e) => ({ n: t.n + e.rec.n, dist: t.dist + e.rec.dist, mov: t.mov + e.rec.mov, sub: t.sub + e.rec.sub, kcal: t.kcal + e.rec.kcal }), { n: 0, dist: 0, mov: 0, sub: 0, kcal: 0 });
+  const totalesRec = est => est.reduce((t, e) => ({ n: t.n + e.rec.n, dist: t.dist + e.rec.dist, mov: t.mov + e.rec.mov, dur: t.dur + e.rec.dur, sub: t.sub + e.rec.sub, baj: t.baj + e.rec.baj, kcal: t.kcal + e.rec.kcal }), { n: 0, dist: 0, mov: 0, dur: 0, sub: 0, baj: 0, kcal: 0 });
 
   /* --- Formulario del recorrido --- */
   function formRecorrido(id) {
@@ -663,6 +768,37 @@ if (typeof accionDocente === 'function') {
     });
   };
 
+  /* --- Pestaña «Recorridos» del docente --- */
+  if (!TABS_DOC.some(t => t[0] === 'recorridos')) TABS_DOC.splice(4, 0, ['recorridos', '🥾 Recorridos']);
+  function renderRecorridosDoc() {
+    const est = calcularEstudiantes(), T = totalesRec(est);
+    const kpi = (t, v) => `<div class="rounded-2xl bg-white/95 shadow p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
+    const con = est.filter(e => e.rec.n), sin = est.filter(e => !e.rec.n);
+    const tarj = con.map(e => {
+      const items = e.rs.map(r => ({ r, a: actPor(r.actividad_id) })).filter(x => esRec(x.a) && recDe(x.r));
+      return `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2">
+        <div class="flex flex-wrap items-center gap-2"><b class="flex-1 min-w-0">${esc(e.est.nombre)} <span class="text-xs text-slate-400 font-normal">${esc(e.est.curso)}</span></b>
+          <span class="text-xs bg-emerald-50 text-emerald-800 rounded-full px-2 py-1">📏 ${fmtKm(e.rec.dist)}</span>
+          <span class="text-xs bg-emerald-50 text-emerald-800 rounded-full px-2 py-1">⬆️ +${Math.round(e.rec.sub)} m</span>
+          <span class="text-xs bg-orange-100 text-orange-800 rounded-full px-2 py-1">🔥 ≈ ${Math.round(e.rec.kcal)} kcal</span></div>
+        ${items.map(({ r, a }) => { const q = recDe(r); return `<div class="flex flex-wrap items-center gap-2 border-t pt-2 text-sm"><span class="flex-1 min-w-0">${esc(a.titulo)} · ${fmtKm(q.dist)} · ${fmtDur(q.dur)} · ≈ ${q.kcal} kcal</span>
+          <button data-accion="rec-ver" data-id="${esc(r.id)}" data-doc="1" class="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-xs font-semibold">🗺️ Ver camino, alturas y fotos</button></div>`; }).join('')}</div>`;
+    }).join('');
+    $('#doc-contenido').innerHTML = `<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">${kpi('Recorridos', T.n)}${kpi('Distancia total', fmtKm(T.dist))}${kpi('Subida acumulada', '+' + Math.round(T.sub) + ' m')}${kpi('Calorías (aprox.)', Math.round(T.kcal))}</div>
+      <div class="space-y-3 mt-4">${tarj || '<div class="bg-white/90 rounded-2xl p-8 text-center text-slate-500">Aún no hay recorridos terminados. Cree uno en «Actividades → + Nuevo recorrido».</div>'}</div>
+      ${sin.length ? `<details class="mt-3 text-sm bg-amber-50 rounded-xl p-3"><summary class="cursor-pointer font-semibold text-amber-800">Sin recorridos (${sin.length})</summary>
+        <ul class="mt-2 list-disc pl-5 text-slate-700">${sin.map(e => `<li>${esc(e.est.nombre)} <span class="text-xs text-slate-400">${esc(e.est.curso)}</span></li>`).join('')}</ul></details>` : ''}
+      <p class="text-xs text-slate-400 mt-3">Las calorías son un cálculo aproximado. Estos totales también quedan en los informes y en el CSV.</p>`;
+  }
+  renderDocente = function () {
+    const porEvaluar = S.panel.respuestas.filter(r => r.estado !== 'evaluada').length;
+    $('#doc-tabs').innerHTML = TABS_DOC.map(([k, t]) =>
+      `<button data-accion="tab-doc" data-tab="${k}" class="px-3 py-2 rounded-xl whitespace-nowrap ${S.tabDoc === k ? 'tab-activa' : ''}">${t}${k === 'respuestas' && porEvaluar ? ` <span class="ml-1 text-xs bg-amber-400 text-slate-900 rounded-full px-1.5">${porEvaluar}</span>` : ''}</button>`).join('');
+    detenerMapa();
+    const f = { resumen: renderResumen, actividades: renderActividades, puntos: renderPuntos, respuestas: renderRespuestas, recorridos: renderRecorridosDoc, ubicaciones: renderUbicaciones, reportes: renderReportes, ajustes: renderAjustes }[S.tabDoc];
+    f();
+  };
+
   /* --- Respuestas de recorridos --- */
   function tarjetaRecDoc(r, a) {
     const rec = recDe(r), hs = hitosDe(a), fot = jsonSeguro(r.fotos, {});
@@ -687,146 +823,8 @@ if (typeof accionDocente === 'function') {
   }
   const _tarjetaRespRec = tarjetaResp;
   tarjetaResp = function (r, a) { return esRec(a) ? tarjetaRecDoc(r, a) : _tarjetaRespRec(r, a); };
-
-  async function aprobarRec(id, silencioso) {
-    const r = S.panel.respuestas.find(x => x.id === id), a = actPor(r.actividad_id);
-    const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(a.puntaje_max), retro: r.retro_docente || '', evaluacion: {} });
-    r.puntaje_final = d.puntaje_final; r.estado = 'evaluada';
-    if (!silencioso) { redibujar(); aviso('Puntaje guardado. El estudiante ya puede verlo.'); }
-  }
-  async function aprobarTodosRec() {
-    const f = S.filtroR;
-    const rs = S.panel.respuestas.filter(r => {
-      const a = actPor(r.actividad_id);
-      if (!esRec(a) || r.estado === 'evaluada' || (f.act && r.actividad_id !== f.act)) return false;
-      const fot = jsonSeguro(r.fotos, {});
-      return recDe(r) && hitosDe(a).every(h => fot[h.id]);
-    });
-    if (!rs.length) return aviso('No hay recorridos completos pendientes de evaluar.');
-    if (!confirm('Se dará el puntaje completo a ' + rs.length + ' recorrido(s) que tienen todas las fotografías. ¿Continuar?')) return;
-    let n = 0;
-    try { for (const r of rs) { cargando(true, `Evaluando (${++n}/${rs.length})…`); await aprobarRec(r.id, true); } }
-    finally { cargando(false); }
-    redibujar(); aviso(rs.length + ' recorrido(s) evaluados.');
-  }
   const _renderRespuestasRec = renderRespuestas;
   renderRespuestas = function () {
     _renderRespuestasRec();
     const b = $('#doc-contenido [data-accion="ia-todas"]');
-    if (b) b.insertAdjacentHTML('beforebegin', '<button data-accion="rec-aprobar-todos" class="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">✔ Aprobar recorridos completos</button>');
-  };
-  // La IA no evalúa recorridos
-  iaTodas = async function () {
-    const f = S.filtroR;
-    const rs = S.panel.respuestas.filter(r => {
-      const a = actPor(r.actividad_id);
-      return a && !esRec(a) && hayParteManual(a) && (!f.act || r.actividad_id === f.act) && r.estado !== 'evaluada' && !tieneIA(r);
-    });
-    if (!rs.length) return aviso('No hay respuestas pendientes sin sugerencia.');
-    let n = 0;
-    for (const r of rs) {
-      n++;
-      if (n > 1) await new Promise(res => setTimeout(res, 2500));
-      cargando(true, `Consultando a la IA (${n}/${rs.length})…`);
-      try { await iaUna(r.id, true); } catch (e) { aviso(e.message, 'error'); break; }
-    }
-    cargando(false); redibujar();
-  };
-
-  /* --- Resumen del curso --- */
-  const _renderResumenRec = renderResumen;
-  renderResumen = function () {
-    _renderResumenRec();
-    const est = calcularEstudiantes(), T = totalesRec(est);
-    const kpi = (t, v) => `<div class="rounded-xl bg-emerald-50 p-3 text-center"><div class="text-lg font-extrabold">${v}</div><div class="text-xs text-slate-500">${t}</div></div>`;
-    const filas = est.filter(e => e.rec.n).map(e => `<tr class="border-t"><td class="py-1.5">${esc(e.est.nombre)}</td><td>${e.rec.n}</td><td>${fmtKm(e.rec.dist)}</td><td>${fmtDur(e.rec.mov)}</td><td>+${Math.round(e.rec.sub)} m</td><td>≈ ${Math.round(e.rec.kcal)}</td></tr>`).join('');
-    $('#doc-contenido').insertAdjacentHTML('beforeend', `<div class="bg-white/95 rounded-2xl shadow p-4 mt-4 overflow-x-auto"><h3 class="font-bold mb-2">🥾 Recorridos del curso</h3>` +
-      (T.n ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">${kpi('Recorridos', T.n)}${kpi('Distancia total', fmtKm(T.dist))}${kpi('Subida acumulada', '+' + Math.round(T.sub) + ' m')}${kpi('Calorías (aprox.)', Math.round(T.kcal))}</div>
-        <table class="w-full text-sm"><thead><tr class="text-left text-slate-500"><th class="py-1">Estudiante</th><th>Recorridos</th><th>Distancia</th><th>En movimiento</th><th>Subida</th><th>kcal aprox.</th></tr></thead><tbody>${filas}</tbody></table>
-        <p class="text-xs text-slate-400 mt-2">Las calorías son un cálculo aproximado. Estos totales también quedan en los reportes y en el CSV.</p>`
-        : '<p class="text-sm text-slate-500">Aún no hay recorridos registrados.</p>') + '</div>');
-  };
-
-  /* --- Reportes --- */
-  const _sintesisGrupoRec = sintesisGrupo;
-  sintesisGrupo = function (est) {
-    const t = _sintesisGrupoRec(est), T = totalesRec(est);
-    return T.n ? t + ` Recorridos: ${T.n} registrados, ${fmtKm(T.dist)} en total, subida acumulada de ${Math.round(T.sub)} m y unas ${Math.round(T.kcal)} kcal (cálculo aproximado).` : t;
-  };
-  // PDF individual: se agrega el resumen de recorridos después del mapa de ubicaciones
-  const _svgMapaRec = svgMapa;
-  svgMapa = function (resp, puntos) { return _svgMapaRec(resp, puntos) + bloqueRecPDF(window.__repKey); };
-  function bloqueRecPDF(key) {
-    const d = key ? calcularEstudiantes().find(x => x.key === key) : null;
-    if (!d || !d.rec.n) return '';
-    let h = `<h3 style="margin:14px 0 6px">Recorridos realizados</h3><p><b>Total:</b> ${d.rec.n} recorrido(s) · ${fmtKm(d.rec.dist)} · ${fmtDur(d.rec.mov)} en movimiento · subida acumulada +${Math.round(d.rec.sub)} m · ≈ ${Math.round(d.rec.kcal)} kcal (aproximado)</p>`;
-    d.rs.forEach(r => {
-      const a = actPor(r.actividad_id), rec = esRec(a) ? recDe(r) : null;
-      if (!rec) return;
-      const fot = jsonSeguro(r.fotos, {});
-      h += `<div class="avoid" style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin:8px 0"><b>${esc(a.titulo)}</b><br>${fmtKm(rec.dist)} · ${fmtDur(rec.dur)} · +${rec.sub} m / −${rec.baj} m · ≈ ${rec.kcal} kcal<br>${svgRutaRec(rec)}${svgPerfil(rec)}<div>` +
-        hitosDe(a).map((hh, i) => {
-          const u = fot[hh.id] && (window.__imgRec || {})[fot[hh.id]], x = rec.hitos[hh.id];
-          return u ? `<span style="display:inline-block;width:32%;margin-right:1%;vertical-align:top;font-size:10px"><img src="${u}" style="width:100%;max-height:110px;object-fit:cover;border-radius:4px"><br>${i + 1}. ${esc(hh.enunciado)}${x && x.a != null ? ' · ' + x.a + ' m' : ''}</span>` : '';
-        }).join('') + '</div></div>';
-    });
-    return h;
-  }
-  const _reporteIndividualRec = reporteIndividual;
-  reporteIndividual = async function (key) {
-    window.__repKey = key; window.__imgRec = {};
-    const d = calcularEstudiantes().find(x => x.key === key);
-    if (d) for (const r of d.rs) {
-      if (!esRec(actPor(r.actividad_id))) continue;
-      for (const id of fotosDe(r)) window.__imgRec[id] = await dataUrlArchivo(id).catch(() => null);
-    }
-    return _reporteIndividualRec(key);
-  };
-  exportarCSV = function () {
-    const est = calcularEstudiantes(), T = totalesRec(est);
-    const cel = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const coma = n => String(n).replace('.', ',');
-    const filas = [['Nombre', 'RUT', 'Curso', 'Firma', 'Respondidas', 'Total actividades', 'Puntaje', 'Logro %', 'Nota', 'Recorridos', 'Km recorridos', 'Minutos en movimiento', 'Subida (m)', 'Calorías aprox.']]
-      .concat(est.map(e => [e.est.nombre, e.est.rut, e.est.curso, e.firma ? 'Sí' : 'No', e.respondidas, S.panel.actividades.length, e.pts, Math.round(e.pct), e.nota.toFixed(1).replace('.', ','),
-        e.rec.n, coma((e.rec.dist / 1000).toFixed(2)), Math.round(e.rec.mov / 60), Math.round(e.rec.sub), Math.round(e.rec.kcal)]))
-      .concat([['TOTAL DEL CURSO', '', '', '', '', '', '', '', '', T.n, coma((T.dist / 1000).toFixed(2)), Math.round(T.mov / 60), Math.round(T.sub), Math.round(T.kcal)]]);
-    const blob = new Blob(['\ufeff' + filas.map(f => f.map(cel).join(';')).join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'resumen_salida_terreno.csv'; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  };
-}
-
-/* =========================================================
-   EVENTOS DE ESTE ARCHIVO
-   ========================================================= */
-const _mm = $('#modal');
-if (_mm) _mm.style.zIndex = '47';   // las ventanas (ficha, etc.) deben verse sobre la pantalla del recorrido
-
-document.addEventListener('click', async e => {
-  const b = e.target.closest('[data-accion]');
-  if (!b) return;
-  const a = b.dataset.accion, id = b.dataset.id;
-  if (a.indexOf('rec-') !== 0) return;
-  try {
-    switch (a) {
-      case 'rec-iniciar': return await iniciarRec();
-      case 'rec-terminar': return await terminarRec();
-      case 'rec-cerrar':
-        cerrarOverlay();
-        if (REC && REC.estado === 'activo') aviso('El recorrido sigue en curso. Para volver, pinche «Abrir recorrido» en la actividad.');
-        return;
-      case 'rec-enviar': return await enviarRec();
-      case 'rec-descartar': return await descartarRec();
-      case 'rec-ver': return verRec(id, b.dataset.doc);
-      case 'rec-aprobar': return typeof aprobarRec === 'function' ? await aprobarRec(id) : undefined;
-      case 'rec-aprobar-todos': return typeof aprobarTodosRec === 'function' ? await aprobarTodosRec() : undefined;
-    }
-  } catch (err) { cargando(false); aviso(err.message, 'error'); }
-});
-document.addEventListener('change', e => {
-  const t = e.target;
-  if (t && t.dataset && t.dataset.rhito && t.files && t.files[0]) {
-    fotoHito(t.dataset.rhito, t.files[0]).catch(err => { cargando(false); aviso(err.message, 'error'); });
-  }
-});
+    if (b) b.insertAdjacentHTML('beforebegin', '<button data-accion="rec-aprobar-todos"
