@@ -2,7 +2,7 @@
 /* =========================================================
    SALIDA A TERRENO – Complementos (Parte 1)
    Carta editable · Presentación del lugar (inicio) · Ficha de cada lugar
-   Condiciones del lugar · Distancia por camino
+   Condiciones del lugar · Distancia por camino · Nota final ajustable
    Se carga después de app.js (y de app-docente.js en el panel docente)
    ========================================================= */
 
@@ -157,6 +157,12 @@ cabeceraPunto = function (g) {
 /* ---------- Presentación del lugar (inicio de la aplicación) ---------- */
 const INI_IC = { historia: '🏛️', flora: '🌿', fauna: '🦅', relieve: '⛰️', poblacion: '👥', otra: '📌' };
 const INI_DEF = { historia: 'Historia', flora: 'Flora', fauna: 'Fauna', relieve: 'Relieve', poblacion: 'Población', otra: 'Información' };
+const INI_MODOS = [
+  ['siempre', 'Siempre visible', 'Se abre sola cada vez que ingresan a la aplicación y queda un botón 📖 flotante en todas las pantallas.'],
+  ['primera', 'Solo la primera vez', 'Se abre sola la primera vez (y cada vez que usted la modifique). Después queda la tarjeta en el inicio.'],
+  ['boton', 'Solo con el botón', 'Nunca se abre sola. Los estudiantes la ven con la tarjeta del inicio.'],
+  ['oculta', 'Oculta', 'Los estudiantes no la ven (por ejemplo, mientras la prepara).']
+];
 
 function seccionTiene(s) {
   const p = s.poblacion || {};
@@ -196,13 +202,21 @@ function tarjetaInicio(ini) {
       ${ini.intro ? `<p class="text-sm text-slate-600 whitespace-pre-line mt-1 line-clamp-3">${esc(ini.intro)}</p>` : ''}
       <button data-accion="ver-inicio" class="mt-3 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-2xl">📖 Ver información del lugar</button></div></div>`;
 }
-// Se abre sola la primera vez (y cada vez que el docente la modifica)
+// Según lo que decida el docente: cada vez que ingresan, solo la primera vez, o solo con el botón
 function autoAbrirInicio(ini) {
   try {
-    const k = 'inicio_visto_' + S.usuario.key;
-    if (localStorage.getItem(k) === String(ini.act)) return;
+    const modo = ini.modo || 'primera';
+    if (modo === 'boton' || modo === 'oculta') return;
     if (!$('#modal').classList.contains('hidden') || $('#pantalla-estudiante').classList.contains('hidden')) return;
-    localStorage.setItem(k, String(ini.act));
+    if (modo === 'siempre') {
+      const k = 'inicio_sesion_' + S.usuario.key;
+      if (sessionStorage.getItem(k)) return;   // una vez cada vez que abren la aplicación
+      sessionStorage.setItem(k, '1');
+    } else {
+      const k = 'inicio_visto_' + S.usuario.key;
+      if (localStorage.getItem(k) === String(ini.act)) return;
+      localStorage.setItem(k, String(ini.act));
+    }
     abrirInicio();
   } catch (_) { /* si no se puede recordar, simplemente no se abre sola */ }
 }
@@ -210,9 +224,20 @@ const _renderEstudianteIni = renderEstudiante;
 renderEstudiante = function () {
   _renderEstudianteIni();
   const ini = S.datos && S.datos.inicio;
-  if (!inicioTiene(ini)) return;
+  let fb = $('#btn-inicio-flot');
+  if (!inicioTiene(ini)) { if (fb) fb.remove(); return; }
   $('#est-info').insertAdjacentHTML('beforeend', tarjetaInicio(ini));
   pintarImagenes($('#est-info'));
+  // Modo «Siempre visible»: botón flotante 📖 en todas las pantallas del estudiante
+  if ((ini.modo || 'primera') === 'siempre') {
+    if (!fb) {
+      fb = document.createElement('button');
+      fb.id = 'btn-inicio-flot'; fb.dataset.accion = 'ver-inicio'; fb.textContent = '📖';
+      fb.setAttribute('aria-label', 'Información del lugar');
+      fb.className = 'fixed bottom-5 left-4 z-30 h-12 w-12 rounded-full bg-teal-700 text-white text-2xl shadow-lg flex items-center justify-center';
+      $('#pantalla-estudiante').appendChild(fb);
+    }
+  } else if (fb) fb.remove();
   autoAbrirInicio(ini);
 };
 
@@ -501,10 +526,15 @@ function formInicio() {
   const secs = BASE.map(t => nueva(t, (ini0.secciones || []).find(x => x.tipo === t) || {}))
     .concat((ini0.secciones || []).filter(s => s.tipo === 'otra').map(s => nueva('otra', s)));
   const portada = { id: ini0.portada || '', file: null, prev: '' };
+  const modo0 = ini0.modo || 'primera';
 
   modal(`<form id="f-inicio" class="space-y-3 pt-2">
     <h3 class="text-lg font-extrabold pr-6">📖 Presentación del lugar</h3>
-    <p class="text-xs text-slate-500">Es lo primero que verán los estudiantes: se abre sola la primera vez que ingresan y queda en su pantalla de inicio. Complete solo lo que quiera; las secciones vacías no se muestran. Puede agregar todas las imágenes que desee.</p>
+    <p class="text-xs text-slate-500">Es lo primero que verán los estudiantes. Complete solo lo que quiera; las secciones vacías no se muestran. Puede agregar todas las imágenes que desee.</p>
+    <div class="rounded-2xl border-2 border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+      <div class="text-sm font-semibold">👁️ ¿Cómo la ven los estudiantes?</div>
+      ${INI_MODOS.map(([k, t, d]) => `<label class="flex items-start gap-2 text-sm cursor-pointer"><input type="radio" name="modo" value="${k}" ${modo0 === k ? 'checked' : ''} class="mt-1"><span><b>${t}.</b> ${d}</span></label>`).join('')}
+    </div>
     <label class="block text-sm font-semibold">Título<input name="titulo" class="${INP} mt-1" placeholder="Ej: Conozca Coliumo" value="${esc(ini0.titulo || '')}"></label>
     <label class="block text-sm font-semibold">Texto de bienvenida
       <textarea name="intro" rows="3" class="${INP} mt-1" placeholder="Una breve presentación de la salida y del lugar que visitarán">${esc(ini0.intro || '')}</textarea></label>
@@ -611,62 +641,97 @@ function formInicio() {
         im.id = d.id; im.file = null;   // si falla algo después, no se vuelve a subir
       }
       cargando(true, 'Guardando la presentación…');
+      const modo = (f.querySelector('input[name=modo]:checked') || {}).value || 'primera';
       const d = await api('guardarPresentacion', {
         inicio: {
-          titulo: f.titulo.value, intro: f.intro.value, portada: portada.id,
+          titulo: f.titulo.value, intro: f.intro.value, portada: portada.id, modo,
           secciones: secs.map(s => ({ tipo: s.tipo, titulo: s.titulo, texto: s.texto, poblacion: s.poblacion,
             imagenes: s.imagenes.filter(im => im.id).map(im => ({ id: im.id, pie: im.pie })) }))
         }
       });
       S.panel.inicio = d.inicio;
       cerrarModal(); redibujar();
-      aviso('Presentación guardada. Los estudiantes la verán al ingresar.');
+      aviso('Presentación guardada.');
     } catch (e) { aviso(e.message, 'error'); } finally { cargando(false); }
   };
 }
 
-/* --- Puntaje completo a recorridos (lo usan los botones de recorrido) --- */
-async function aprobarRec(id, silencioso) {
-  const r = S.panel.respuestas.find(x => x.id === id), a = actPor(r.actividad_id);
-  const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(a.puntaje_max), retro: r.retro_docente || '', evaluacion: {} });
-  r.puntaje_final = d.puntaje_final; r.estado = 'evaluada';
-  if (!silencioso) { redibujar(); aviso('Puntaje guardado. El estudiante ya puede verlo.'); }
-}
-async function aprobarTodosRec() {
-  const f = S.filtroR;
-  const rs = S.panel.respuestas.filter(r => {
-    const a = actPor(r.actividad_id);
-    if (!esRec(a) || r.estado === 'evaluada' || (f.act && r.actividad_id !== f.act)) return false;
-    const fot = jsonSeguro(r.fotos, {});
-    return recDe(r) && hitosDe(a).every(h => fot[h.id]);
-  });
-  if (!rs.length) return aviso('No hay recorridos completos pendientes de evaluar.');
-  if (!confirm('Se dará el puntaje completo a ' + rs.length + ' recorrido(s) que tienen todas las fotografías. ¿Continuar?')) return;
-  let n = 0;
-  try { for (const r of rs) { cargando(true, `Evaluando (${++n}/${rs.length})…`); await aprobarRec(r.id, true); } }
-  finally { cargando(false); }
-  redibujar(); aviso(rs.length + ' recorrido(s) evaluados.');
+/* --- Nota final: escala 1,0 a 7,0 (60 % de exigencia), modificable por el docente --- */
+function formNota(key) {
+  const e = calcularEstudiantes().find(x => x.key === key);
+  if (!e) return;
+  modal(`<form id="f-nota" class="space-y-3 pt-2">
+    <h3 class="text-lg font-extrabold pr-6">✏️ Nota de ${esc(e.est.nombre)}</h3>
+    <div class="rounded-xl bg-slate-50 p-3 text-sm space-y-1">
+      <div>Logro: <b>${Math.round(e.pct)} %</b> (${esc(e.pts)} pt)</div>
+      <div>Nota calculada (escala 1,0 a 7,0; ${EXIGENCIA} % de exigencia = 4,0): <b>${e.notaCalc.toFixed(1)}</b></div></div>
+    <label class="block text-sm font-semibold">Nota final (de 1,0 a 7,0)
+      <input name="nota" type="number" step="0.1" min="1" max="7" value="${e.ajustada ? e.nota.toFixed(1) : ''}" placeholder="${e.notaCalc.toFixed(1)}" class="${INP} mt-1"></label>
+    <label class="block text-sm font-semibold">Motivo del ajuste (opcional; solo lo ve usted)
+      <textarea name="obs" rows="2" class="${INP} mt-1">${esc(e.est.nota_obs || '')}</textarea></label>
+    <p class="text-xs text-slate-500">Si deja la nota vacía, se usa la nota calculada. Los estudiantes no ven sus notas en la aplicación.</p>
+    <div class="flex gap-2"><button type="button" id="fn-quitar" class="px-3 py-2 rounded-xl bg-slate-100 text-sm">Volver a la nota calculada</button>
+      <button class="flex-1 bg-teal-700 text-white font-bold py-2.5 rounded-xl">Guardar nota</button></div>
+  </form>`);
+  const f = $('#f-nota');
+  const guardar = async (nota, obs) => {
+    cargando(true, 'Guardando la nota…');
+    try {
+      const d = await api('guardarNota', { rut: e.est.rut, nota, obs });
+      e.est.nota_doc = d.nota_doc; e.est.nota_obs = d.nota_obs;
+      cerrarModal(); redibujar();
+      aviso(nota === '' ? 'Se usa la nota calculada.' : 'Nota guardada.');
+    } catch (err) { aviso(err.message, 'error'); } finally { cargando(false); }
+  };
+  $('#fn-quitar').onclick = () => guardar('', f.obs.value);
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const v = f.nota.value.trim();
+    if (v !== '' && (!isFinite(+v) || +v < 1 || +v > 7)) return aviso('La nota debe estar entre 1,0 y 7,0.', 'error');
+    guardar(v, f.obs.value);
+  };
 }
 
 /* =========================================================
    PANEL DOCENTE: ajustes a las pantallas existentes
    ========================================================= */
 if (typeof accionDocente === 'function') {
-  // Una firma vale solo si corresponde a la versión actual de la carta
+  // Una firma vale solo si corresponde a la versión actual de la carta.
+  // La nota final es la que fijó el docente (si la modificó) o la calculada.
   const _calcularEstudiantes = calcularEstudiantes;
   calcularEstudiantes = function () {
     const r = _calcularEstudiantes(), v = (S.panel.carta && S.panel.carta.version) || '';
-    r.forEach(e => { e.firma = S.panel.firmas.some(f => rutKey(f.rut) === e.key && String(f.carta_version || '') === v); });
+    r.forEach(e => {
+      e.firma = S.panel.firmas.some(f => rutKey(f.rut) === e.key && String(f.carta_version || '') === v);
+      e.notaCalc = e.nota;
+      const d = Number(e.est.nota_doc);
+      if (e.est.nota_doc !== '' && e.est.nota_doc != null && isFinite(d) && d >= 1 && d <= 7) { e.nota = d; e.ajustada = true; }
+    });
     return r;
+  };
+
+  // En el Resumen: cada nota se puede modificar con ✏️
+  const _renderResumenNota = renderResumen;
+  renderResumen = function () {
+    _renderResumenNota();
+    const est = calcularEstudiantes();
+    $$('#doc-contenido table tbody tr').forEach((tr, i) => {
+      const e = est[i], td = tr.children[4];
+      if (!e || !td) return;
+      td.innerHTML = `<b>${e.nota.toFixed(1)}</b>${e.ajustada ? ' <span class="text-[10px] text-amber-700" title="Nota modificada por el docente">(ajustada)</span>' : ''} <button data-accion="editar-nota" data-rut="${esc(e.key)}" class="text-xs" aria-label="Modificar la nota">✏️</button>`;
+    });
+    const tb = $('#doc-contenido table');
+    if (tb) tb.parentElement.insertAdjacentHTML('beforeend', `<p class="text-xs text-slate-500 mt-1">Escala de notas de 1,0 a 7,0: con ${EXIGENCIA} % de exigencia, el ${EXIGENCIA} % de logro equivale a la nota 4,0. Con ✏️ puede modificar la nota de cada estudiante.</p>`);
   };
 
   const bloqueInicio = () => {
     const i = S.panel.inicio;
     const n = i ? (i.secciones || []).filter(seccionTiene).length : 0;
+    const modo = (INI_MODOS.find(m => m[0] === ((i && i.modo) || 'primera')) || INI_MODOS[1])[1];
     return `<div class="bg-white/95 rounded-2xl shadow p-4 space-y-2 mb-4">
       <h3 class="font-bold">📖 Presentación del lugar (inicio de la aplicación)</h3>
       <p class="text-sm text-slate-500">Lo primero que ven los estudiantes: imagen de portada, historia, flora, fauna, relieve, población y las secciones que usted agregue, con todas las imágenes que quiera.</p>
-      <p class="text-xs text-slate-500">${i && inicioTiene(i) ? 'Actualmente: ' + n + ' sección(es) con contenido' + (i.portada ? ' y portada' : '') + '.' : 'Aún no ha creado la presentación.'}</p>
+      <p class="text-xs text-slate-500">${i && inicioTiene(i) ? 'Actualmente: ' + n + ' sección(es) con contenido' + (i.portada ? ' y portada' : '') + ' · Visibilidad: <b>' + modo + '</b>.' : 'Aún no ha creado la presentación.'}</p>
       <button data-accion="editar-inicio" class="bg-teal-700 text-white font-semibold px-4 py-2 rounded-xl">✏️ ${i && inicioTiene(i) ? 'Editar' : 'Crear'} la presentación</button></div>`;
   };
 
@@ -703,6 +768,62 @@ if (typeof accionDocente === 'function') {
   };
 }
 
+/* --- Puntaje completo a recorridos (lo usan los botones de recorrido) --- */
+async function aprobarRec(id, silencioso) {
+  const r = S.panel.respuestas.find(x => x.id === id), a = actPor(r.actividad_id);
+  const d = await api('guardarEvaluacion', { respuesta_id: id, puntaje_final: Number(a.puntaje_max), retro: r.retro_docente || '', evaluacion: {} });
+  r.puntaje_final = d.puntaje_final; r.estado = 'evaluada';
+  if (!silencioso) { redibujar(); aviso('Puntaje guardado. El estudiante ya puede verlo.'); }
+}
+async function aprobarTodosRec() {
+  const f = S.filtroR;
+  const rs = S.panel.respuestas.filter(r => {
+    const a = actPor(r.actividad_id);
+    if (!esRec(a) || r.estado === 'evaluada' || (f.act && r.actividad_id !== f.act)) return false;
+    const fot = jsonSeguro(r.fotos, {});
+    return recDe(r) && hitosDe(a).every(h => fot[h.id]);
+  });
+  if (!rs.length) return aviso('No hay recorridos completos pendientes de evaluar.');
+  if (!confirm('Se dará el puntaje completo a ' + rs.length + ' recorrido(s) que tienen todas las fotografías. ¿Continuar?')) return;
+  let n = 0;
+  try { for (const r of rs) { cargando(true, `Evaluando (${++n}/${rs.length})…`); await aprobarRec(r.id, true); } }
+  finally { cargando(false); }
+  redibujar(); aviso(rs.length + ' recorrido(s) evaluados.');
+}
+
+/* =========================================================
+   Recorrido en curso: contador de calorías bien visible
+   (se aplica cuando ya cargaron todos los archivos)
+   ========================================================= */
+window.addEventListener('load', () => {
+  if (typeof vistaActivo !== 'function' || typeof hitosDe !== 'function' || typeof celdaRec === 'undefined') return;
+  vistaActivo = function () {
+    const a = REC.act, hs = hitosDe(a);
+    return cabeceraRec('Recorrido en curso') + `<div class="p-4 space-y-3 max-w-2xl mx-auto">
+      <div id="rec-gps" class="text-xs text-center text-slate-600">⏳ Buscando señal…</div>
+      <div class="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 text-white p-4 shadow flex items-center gap-3">
+        <div class="text-4xl">🔥</div>
+        <div class="flex-1"><div class="text-xs opacity-90">Calorías gastadas (aproximado)</div>
+          <div id="rec-kcal" class="text-3xl font-extrabold leading-tight">0 kcal</div>
+          <div class="text-[11px] opacity-90">Empiezan a contar cuando camine unos 50 metros.</div></div></div>
+      <div class="grid grid-cols-3 gap-2">${celdaRec('📏', '–', 'Distancia', 'rec-km')}${celdaRec('⏱️', '–', 'Tiempo', 'rec-t')}${celdaRec('⬆️', '–', 'Subida', 'rec-sub')}
+        ${celdaRec('⛰️', '–', 'Altura (GPS)', 'rec-alt')}${celdaRec('📷', '–', 'Fotografías', 'rec-fotos')}</div>
+      <div id="rec-mapa" class="h-56 rounded-2xl overflow-hidden border shadow" style="isolation:isolate"></div>
+      ${hs.length ? `<div class="space-y-2">${hs.map((h, i) => {
+        const x = REC.hitos[h.id];
+        return `<div class="bg-white rounded-2xl p-3 shadow flex items-center gap-3"><span class="pin shrink-0">${i + 1}</span>
+          <div class="flex-1 min-w-0"><div class="font-semibold text-sm">${esc(h.enunciado)}</div>
+            <div class="text-xs ${x ? 'text-emerald-700' : 'text-slate-500'}">${x ? '✔ Tomada a las ' + hora(x.t) + (x.dp != null ? ' · a ' + fmtDist(x.dp) + ' del lugar' : '') : 'Pendiente'}</div></div>
+          <label class="shrink-0 text-xs bg-amber-50 border border-amber-300 rounded-full px-3 py-2 font-semibold cursor-pointer">📷 ${x ? 'Repetir' : 'Tomar'}
+            <input type="file" accept="image/*" capture="environment" data-rhito="${esc(h.id)}" class="hidden"></label></div>`;
+      }).join('')}</div>` : ''}
+      <button data-accion="rec-terminar" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 rounded-2xl shadow text-lg">⏹ Terminar recorrido</button>
+      <button data-accion="rec-descartar" class="w-full text-xs text-slate-500 underline">Descartar este recorrido y empezar de nuevo</button>
+      <p class="text-[11px] text-slate-400 text-center">Puede ocultar esta pantalla con la flecha ←; el recorrido sigue registrándose. Para volver, pinche «Abrir recorrido» en la actividad.</p>
+    </div>`;
+  };
+});
+
 /* =========================================================
    EVENTOS DE ESTE ARCHIVO
    ========================================================= */
@@ -717,5 +838,6 @@ document.addEventListener('click', async e => {
     if (a === 'editar-ficha') return formFicha(id);
     if (a === 'editar-carta') return formCarta();
     if (a === 'editar-inicio') return formInicio();
+    if (a === 'editar-nota') return formNota(b.dataset.rut);
   } catch (err) { cargando(false); aviso(err.message, 'error'); }
 });
