@@ -1,0 +1,18 @@
+{
+  "id": "docente",
+  "name": "Panel docente – Salida a Terreno",
+  "short_name": "Docente",
+  "description": "Panel de los docentes de la salida a terreno del Colegio Marina de Chile.",
+  "start_url": "docente.html",
+  "scope": "docente.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "es-CL",
+  "background_color": "#eef2ff",
+  "theme_color": "#312e81",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
