@@ -473,7 +473,8 @@
         Object.assign(G, { rut: rut, cont: {}, estf: {}, equipo: '', fichas: {}, vc: '', cargada: false, html: '', ev: { T: [], P: null } });
         const l = LS.get('guias:' + rut);
         if (l) { G.cont = l.cont || {}; G.vc = l.vc || ''; G.estf = l.estf || {}; G.equipo = l.equipo || ''; G.ev = l.ev || { T: [], P: null }; G.fichas = fusionar({}); }
-        refrescar(true);
+        if (l && S.tab !== 'guia') setTimeout(() => refrescar(true), 2500);   // ya hay copia guardada: no compite con la carga principal
+        else setTimeout(() => refrescar(true), S.tab === 'guia' ? 0 : 1200);
       }
       dibujar();
     }
@@ -482,23 +483,30 @@
       try { if (typeof renderTabsEst === 'function') renderTabsEst(); } catch (_) {}
       try { pintarAvance(); } catch (e) { console.error(e); }
     }
+    const datosListos = () => !!(S.datos && Array.isArray(S.datos.actividades));
+    // Orden pedido: Guía, Todas, Realizadas, Pendientes, (Recorridos), Mapa
+    const RANGO = t => ({ guia: 0, todas: 1, realizadas: 2, pendientes: 3, recorridos: 4 })[t] !== undefined ? ({ guia: 0, todas: 1, realizadas: 2, pendientes: 3, recorridos: 4 })[t] : (/mapa/i.test(t) ? 6 : 5);
     const _renderTabsGuias = renderTabsEst;
     renderTabsEst = function () {
+      if (!datosListos()) return;   // los datos aún no llegaron (p. ej. recién firmada la carta): se dibuja cuando lleguen
       _renderTabsGuias();
-      const nav = $('#est-tabs');
-      if (!nav) return;
-      nav.querySelectorAll('[data-tab="guia"]').forEach(x => x.remove());
-      const pend = nav.querySelector('[data-tab="pendientes"]');
-      const html = '<button data-accion="tab-est" data-tab="guia" class="py-2 rounded-xl flex flex-col items-center leading-tight ' + (S.tab === 'guia' ? 'tab-activa' : '') + '"><span class="text-lg">📘</span><span>Guía' + (hayActivas() ? ' 🔔' : '') + '</span></button>';
-      if (pend) pend.insertAdjacentHTML('afterend', html); else nav.insertAdjacentHTML('afterbegin', html);
-      const n = nav.children.length;
-      nav.className = 'grid ' + (n >= 6 ? 'grid-cols-6' : n === 5 ? 'grid-cols-5' : 'grid-cols-4') + ' gap-1 bg-white/95 rounded-2xl shadow p-1 text-xs font-semibold';
-      if (n >= 6) nav.querySelectorAll('button').forEach(b => { b.style.fontSize = '10px'; });
+      try {
+        const nav = $('#est-tabs');
+        if (!nav) return;
+        nav.querySelectorAll('[data-tab="guia"]').forEach(x => x.remove());
+        const html = '<button data-accion="tab-est" data-tab="guia" class="py-2 rounded-xl flex flex-col items-center leading-tight ' + (S.tab === 'guia' ? 'tab-activa' : '') + '"><span class="text-lg">📘</span><span>Guía' + (hayActivas() ? ' 🔔' : '') + '</span></button>';
+        nav.insertAdjacentHTML('afterbegin', html);
+        const bs = Array.prototype.slice.call(nav.children);
+        bs.map((b, i) => ({ b: b, i: i, r: RANGO(b.dataset.tab || '') })).sort((x, y) => x.r - y.r || x.i - y.i).forEach(x => nav.appendChild(x.b));
+        const n = nav.children.length;
+        nav.className = 'grid ' + (n >= 6 ? 'grid-cols-6' : n === 5 ? 'grid-cols-5' : 'grid-cols-4') + ' gap-1 bg-white/95 rounded-2xl shadow p-1 text-xs font-semibold';
+        if (n >= 6) nav.querySelectorAll('button').forEach(b => { b.style.fontSize = '10px'; });
+      } catch (e) { console.error(e); }
     };
     const _renderContenidoGuias = renderContenidoEst;
     renderContenidoEst = function () {
       if (S.tab !== 'guia') return _renderContenidoGuias();
-      renderTabsEst();
+      try { renderTabsEst(); } catch (e) { console.error(e); }
       if (typeof detenerMapa === 'function') detenerMapa();
       const box = $('#est-contenido');
       if (!box) return;
@@ -510,12 +518,16 @@
     renderEstudiante = function () { _renderEstGuias(); try { montar(); refrescarPantalla(); } catch (e) { console.error(e); } };
 
     // Revisión periódica (el estado de las fichas cambia cuando el docente las habilita o las cierra)
+    let ultimo = Date.now();
     setInterval(() => {
       const p = $('#pantalla-estudiante');
       if (document.hidden || !navigator.onLine || !S.token || !p || p.classList.contains('hidden')) return;
+      // en la pestaña Guía cada 25 s; en las demás cada 60 s (menos tráfico y más rapidez en el resto de la app)
+      if (Date.now() - ultimo < (S.tab === 'guia' ? 24000 : 59000)) return;
+      ultimo = Date.now();
       refrescar(false);
-    }, 25000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token && G.rut) refrescar(false); });
+    }, 5000);
+    document.addEventListener('visibilitychange', () => { const p = $('#pantalla-estudiante'); if (!document.hidden && S.token && G.rut && p && !p.classList.contains('hidden')) refrescar(false); });
     window.addEventListener('online', () => { sincronizarPendientes(); refrescar(false); });
   }
 
