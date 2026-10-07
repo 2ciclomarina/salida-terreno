@@ -536,7 +536,7 @@
      ========================================================= */
   function iniciarDocente() {
     if (typeof renderDocente !== 'function' || typeof TABS_DOC === 'undefined') return;
-    let GD = null;
+    let GD = null, GD_IA = {};
     const gsub = () => S.gsub || 'fichas';
     const cont = s => (GD && GD.cont[s] && GD.cont[s].length ? GD.cont[s] : DEF[s]);
     const equipos = () => cont('equipos'), fichasL = () => cont('fichas');
@@ -741,10 +741,44 @@
           return '<details class="rounded-xl border"' + (!propia && reg && reg.e === 'enviada' && f === fl.find(g => GD.asig[k] !== g.expone && r.fichas[g.id]) ? ' open' : '') + '><summary class="flex items-center gap-2 p-2 cursor-pointer text-sm font-semibold"><span class="flex-1">Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '</span>' + ch + '</summary><div class="p-2 space-y-2">' + (propia ? '<p class="text-sm text-slate-500">No corresponde: su equipo expone este tema.</p>' : htmlRespFicha(f, reg)) + '</div></details>';
         }).join('') + '</div>' +
         '<div class="rounded-xl border-2 border-indigo-200 p-2 space-y-2"><div class="font-bold text-sm">📋 Rúbrica de las fichas <span class="text-xs font-normal text-slate-500">· pinche la celda del nivel logrado</span></div>' +
+        '<div class="flex flex-wrap items-center gap-2"><button data-accion="g-ia" data-r="' + esc(k) + '" class="px-3 py-2 rounded-xl bg-violet-600 text-white text-sm font-bold">🤖 Sugerir evaluación con IA</button><span class="text-xs text-slate-500">La IA solo propone: usted decide si la usa o cambia las celdas.</span></div><div id="g-ia-box"></div>' +
         '<div id="g-rubp-tabla">' + tablaRub(rub, { edit: true, attr: 'gp', rut: k, dims: false, sel: id => d.niv[id] }) + '</div>' +
         '<textarea data-gpobs data-r="' + esc(k) + '" rows="2" placeholder="Retroalimentación breve (solo sobre su trabajo)" class="w-full border rounded-xl px-3 py-2 text-sm">' + esc(d.obs) + '</textarea>' +
         '<div id="g-ptot" class="text-sm font-bold"></div><span id="g-gp-st" class="text-xs"></span></div>' + navH + '</div>');
       totalesP(k);
+    }
+    // IA: propone niveles y un comentario; el docente puede usarlos tal cual o modificarlos
+    async function sugerirIA(k) {
+      const rub = cont('rubP'), fl = fichasL();
+      cargando(true, 'La IA está revisando las fichas…');
+      let r;
+      try {
+        r = await api('sugerirEvalPares', {
+          rut: k,
+          rub: rub.map(x => ({ id: x.id, nom: x.nom, L: x.L, M: x.M, N: x.N })),
+          fichas: fl.map(f => ({ id: f.id, tema: f.tema, expone: f.expone, q: f.q.map(q => ({ t: q.t })) }))
+        });
+      } finally { cargando(false); }
+      GD_IA[k] = r;
+      const bx = $('#g-ia-box'); if (!bx) return;
+      const et = { 2: 'Logrado · 2', 1: 'Medianamente logrado · 1', 0: 'No observado · 0' }, col = { 2: 'bg-emerald-100 text-emerald-800', 1: 'bg-amber-100 text-amber-800', 0: 'bg-rose-100 text-rose-800' };
+      const pts = rub.reduce((t, x) => t + (r.niv[x.id] || 0), 0);
+      bx.innerHTML = '<div class="rounded-xl border-2 border-violet-300 bg-violet-50 p-2 space-y-2 text-sm"><div class="font-bold">🤖 Sugerencia de la IA: ' + pts + ' / ' + rub.length * 2 + ' puntos</div>' +
+        rub.map(x => '<div class="flex gap-2 items-start"><span class="shrink-0 text-xs font-semibold rounded-full px-2 py-0.5 ' + (col[r.niv[x.id]] || 'bg-slate-100') + '">' + esc(x.id) + ' · ' + (r.niv[x.id] !== undefined ? et[r.niv[x.id]] : 'sin dato') + '</span><span class="text-xs text-slate-700">' + esc(r.razones[x.id] || '') + '</span></div>').join('') +
+        (r.obs ? '<div class="text-xs rounded-lg bg-white p-2"><b>Comentario propuesto:</b> ' + esc(r.obs) + '</div>' : '') +
+        '<div class="flex flex-wrap gap-2"><button data-accion="g-ia-usar" data-r="' + esc(k) + '" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">✅ Usar esta sugerencia</button><button data-accion="g-ia-cerrar" class="px-3 py-2 rounded-xl bg-white border text-sm font-semibold">Descartar</button></div>' +
+        '<div class="text-[11px] text-slate-500">Al usarla se marcan las celdas y se guarda; después puede cambiar cualquier celda o el comentario.</div></div>';
+    }
+    function usarIA(k) {
+      const r = GD_IA[k], d = GD.dP[k];
+      if (!r || !d) return;
+      Object.keys(r.niv).forEach(id => {
+        d.niv[id] = r.niv[id];
+        document.querySelectorAll('#g-rubp-tabla td.gcel[data-id="' + id + '"]').forEach(c => c.classList.toggle('sel', Number(c.dataset.n) === r.niv[id]));
+      });
+      if (r.obs) { d.obs = r.obs; const t = document.querySelector('[data-gpobs]'); if (t) t.value = r.obs; }
+      totalesP(k); guardarP(k);
+      const bx = $('#g-ia-box'); if (bx) bx.innerHTML = '<div class="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs p-2">✅ Se aplicó la sugerencia de la IA. Revise las celdas y cambie lo que estime necesario: cada cambio se guarda solo.</div>';
     }
     function totalesP(k) {
       const rub = cont('rubP'), max = rub.length * 2, d = GD.dP[k], e = $('#g-ptot');
@@ -963,7 +997,10 @@
           cargando(true, 'Actualizando…');
           try { const eq = GD.eq, fp = GD.fP, fe = GD.fEq, fn = GD.fN; await cargarGD(); GD.eq = eq; GD.fP = fp; GD.fEq = fe; GD.fN = fn; } finally { cargando(false); }
           pintar(); aviso('Información actualizada.');
-        } else if (a === 'g-nivel') {
+        } else if (a === 'g-ia') await sugerirIA(b.dataset.r);
+        else if (a === 'g-ia-usar') usarIA(b.dataset.r);
+        else if (a === 'g-ia-cerrar') { const bx = $('#g-ia-box'); if (bx) bx.innerHTML = ''; }
+        else if (a === 'g-nivel') {
           const id = b.dataset.id, n = Number(b.dataset.n);
           b.parentElement.querySelectorAll('.gcel').forEach(c => c.classList.toggle('sel', c === b));
           if (b.dataset.attr === 'gt') {
