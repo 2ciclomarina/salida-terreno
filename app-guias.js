@@ -4,8 +4,8 @@
    Guías de la salida: recorrido, paso a paso, equipos, hoja de ruta,
    rúbrica de terreno y fichas de aprendizaje entre pares.
    Se carga DESPUÉS de app-imagenes.js, en index.html y en docente.html.
-   No modifica ninguna otra función: solo agrega una sección antes de «Pendientes»
-   (estudiantes) y la pestaña «Guías» (docentes).
+   No modifica ninguna otra función: agrega la pestaña «Guía» junto a «Pendientes»
+   (estudiantes), el cuadro de nota final junto al avance y la pestaña «Guías» (docentes).
    ========================================================= */
 (function () {
   const MODO = document.body.dataset.modo;
@@ -42,8 +42,11 @@
   st.textContent = 'details.gd>summary{list-style:none}details.gd>summary::-webkit-details-marker{display:none}' +
     'details.gd[open]>summary>.gchev{transform:rotate(180deg)}.gchev{transition:transform .15s}' +
     '@keyframes gpulso{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.65)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}.gpulso{animation:gpulso 1.6s infinite}' +
-    '.gesc:has(input:checked){background:#0f766e;color:#fff;border-color:#0f766e}' +
-    '.gopt:has(input:checked){outline:3px solid #4f46e5;background:#eef2ff}';
+    '.gesc.sel{background:#0f766e;color:#fff;border-color:#0f766e}' +
+    '.gcel.sel{background:#e0e7ff !important;box-shadow:inset 0 0 0 3px #4f46e5;font-weight:600;color:#1e1b4b}' +
+    '.gcel.sel::before{content:"✔ Marcado";display:block;font-size:10px;color:#4338ca;font-weight:800;margin-bottom:2px}' +
+    '.gcel[data-accion]{cursor:pointer}.gcel[data-accion]:hover{background:#f1f5f9}' +
+    '.gtab td,.gtab th{vertical-align:top}';
   document.head.appendChild(st);
 
   const ABIERTOS = new Set();
@@ -97,35 +100,62 @@
         '<div>' + esc(r.q) + '</div><div class="text-xs text-slate-500 mt-1">📎 Evidencia: ' + esc(r.e) + '</div></div>').join('') +
       '<p class="text-xs text-slate-600 bg-slate-50 rounded-xl p-2">' + esc(COMUN_TEL) + '</p>';
   }
-  function htmlRubT(rub) {
-    let dim = '', h = '';
+  /* ---------- Rúbrica en formato tabla (indicador × niveles de logro) ---------- */
+  const NIV = [[2, 'Logrado', '2 pts', '#dcfce7', '#166534'], [1, 'Medianamente logrado', '1 pt', '#fef3c7', '#92400e'], [0, 'No observado', '0 pts', '#ffe4e6', '#9f1239']];
+  // o.sel(id) → nivel marcado (2, 1, 0 o undefined) · o.edit → las celdas se pueden pinchar (docente)
+  function tablaRub(rub, o) {
+    o = o || {};
+    let dim = '';
+    let h = '<div class="overflow-x-auto rounded-xl border border-slate-300 bg-white"><table class="gtab w-full border-collapse text-xs" style="min-width:640px"><thead><tr>' +
+      '<th class="text-left p-2 bg-slate-800 text-white" style="width:22%">Indicador</th>' +
+      NIV.map(n => '<th class="p-2 text-center border-l" style="background:' + n[3] + ';color:' + n[4] + ';width:26%">' + n[1] + '<br><span class="font-normal">' + n[2] + '</span></th>').join('') +
+      '</tr></thead><tbody>';
     rub.forEach(r => {
-      if (r.dim !== dim) { dim = r.dim; h += '<div class="pt-2"><div class="font-extrabold text-sm uppercase tracking-wide text-teal-800">' + esc(dim) + '</div><div class="text-[11px] text-slate-500">' + esc(DIMD[dim] || '') + '</div></div>'; }
-      h += '<div class="rounded-xl border p-2 space-y-1 text-sm"><div class="font-bold">' + esc(r.id) + ' · ' + esc(r.nom) + '</div>' +
-        '<div class="rounded-lg bg-emerald-50 p-2"><b class="text-emerald-800">Logrado · 2 pts:</b> ' + esc(r.L) + '</div>' +
-        '<div class="rounded-lg bg-amber-50 p-2"><b class="text-amber-800">Medianamente logrado · 1 pt:</b> ' + esc(r.M) + '</div>' +
-        '<div class="rounded-lg bg-rose-50 p-2"><b class="text-rose-800">No observado · 0 pts:</b> ' + esc(r.N) + '</div>' +
-        (r.v ? '<div class="text-[11px] text-slate-500">🔎 Se verifica con: ' + esc(r.v) + '</div>' : '') + '</div>';
+      if (r.dim !== dim) {
+        dim = r.dim;
+        h += '<tr><td colspan="4" class="p-2 bg-slate-100 font-extrabold uppercase tracking-wide text-teal-800">' + esc(dim) +
+          (DIMD[dim] ? ' <span class="normal-case font-normal text-slate-500">· ' + esc(DIMD[dim]) + '</span>' : '') + '</td></tr>';
+      }
+      const v = o.sel ? o.sel(r.id) : undefined;
+      h += '<tr><td class="p-2 border-t font-bold">' + esc(r.id) + ' · ' + esc(r.nom) +
+        (r.v ? '<div class="font-normal text-[10px] text-slate-500 mt-1">🔎 ' + esc(r.v) + '</div>' : '') + '</td>' +
+        NIV.map(n => {
+          const tx = n[0] === 2 ? r.L : n[0] === 1 ? r.M : r.N;
+          const cl = 'gcel p-2 border-t border-l' + (v === n[0] ? ' sel' : '');
+          return o.edit
+            ? '<td class="' + cl + '" data-accion="g-nivel" data-attr="' + o.attr + '" data-id="' + esc(r.id) + '" data-n="' + n[0] + '"' + (o.rut ? ' data-r="' + esc(o.rut) + '"' : '') + ' role="button" tabindex="0">' + esc(tx) + '</td>'
+            : '<td class="' + cl + '">' + esc(tx) + '</td>';
+        }).join('') + '</tr>';
     });
-    const max = rub.length * 2;
-    return h + '<p class="text-xs text-slate-600 pt-1">Total máximo: ' + max + ' puntos. Escala de 1,0 a 7,0 con 60 % de exigencia: ' + fmt1(max * 0.6) + ' de ' + max + ' puntos corresponden a la nota 4,0. Se cuentan hechos, no opiniones.</p>';
+    return h + '</tbody></table></div>';
   }
-  function htmlRubP(rub) {
+  function htmlRubT(rub, sel, pie) {
     const max = rub.length * 2;
-    return '<p class="text-sm">Se aplica a las fichas que usted completa. Cada indicador cuenta fichas.</p>' + rub.map(r =>
-      '<div class="rounded-xl border p-2 space-y-1 text-sm"><div class="font-bold">' + esc(r.dim) + ' · ' + esc(r.id) + ' · ' + esc(r.nom) + '</div>' +
-      '<div class="rounded-lg bg-emerald-50 p-2"><b class="text-emerald-800">Logrado · 2 pts:</b> ' + esc(r.L) + '</div>' +
-      '<div class="rounded-lg bg-amber-50 p-2"><b class="text-amber-800">Medianamente logrado · 1 pt:</b> ' + esc(r.M) + '</div>' +
-      '<div class="rounded-lg bg-rose-50 p-2"><b class="text-rose-800">No observado · 0 pts:</b> ' + esc(r.N) + '</div></div>').join('') +
+    return (pie || '') + tablaRub(rub, { sel: sel }) +
+      '<p class="text-xs text-slate-600 pt-1">Total máximo: ' + max + ' puntos. Escala de 1,0 a 7,0 con 60 % de exigencia: ' + fmt1(max * 0.6) + ' de ' + max + ' puntos corresponden a la nota 4,0. Se cuentan hechos, no opiniones.</p>';
+  }
+  function htmlRubP(rub, sel, pie) {
+    const max = rub.length * 2;
+    return (pie || '') + '<p class="text-sm">Se aplica a las fichas que usted completa (no a la de su propio equipo).</p>' + tablaRub(rub, { sel: sel }) +
       '<p class="text-xs text-slate-600">Total máximo: ' + max + ' puntos. ' + fmt1(max * 0.6) + ' puntos equivalen a la nota 4,0.</p>';
   }
+
+  /* ---------- Nota de la salida: 40 % aplicación + 40 % terreno + 20 % fichas (se suman porcentajes de logro) ---------- */
+  function combinar(comps) {
+    const ap = comps.filter(c => c.aplica);
+    const w = ap.reduce((t, c) => t + c.w, 0);
+    const frac = w ? ap.reduce((t, c) => t + c.w * (c.max ? Math.min(1, c.pts / c.max) : 0), 0) / w : 0;
+    return { frac: frac, completo: ap.length > 0 && ap.every(c => c.ok), nota: notaDe(frac, 1), ap: ap };
+  }
+  const ptsDe = (niv, rub) => rub.reduce((t, r) => t + (Number((niv || {})[r.id]) || 0), 0);
+  const pct = c => c.max ? Math.round(100 * Math.min(1, c.pts / c.max)) : 0;
 
   /* =========================================================
      ESTUDIANTES
      ========================================================= */
   function iniciarAlumno() {
-    if (typeof renderEstudiante !== 'function') return;
-    const G = { rut: '', cont: {}, estf: {}, equipo: '', fichas: {}, vc: '', cargada: false, html: '', pend: false };
+    if (typeof renderEstudiante !== 'function' || typeof renderTabsEst !== 'function' || typeof renderContenidoEst !== 'function') return;
+    const G = { rut: '', cont: {}, estf: {}, equipo: '', fichas: {}, vc: '', cargada: false, html: '', pend: false, ev: { T: [], P: null } };
     const cont = s => (G.cont && G.cont[s] && G.cont[s].length ? G.cont[s] : DEF[s]);
     const lsKey = f => 'gf:' + G.rut + ':' + f;
     const equipos = () => cont('equipos'), fichasL = () => cont('fichas');
@@ -136,33 +166,27 @@
     const ACC_WR = ['guardarFichaPar'];
     if (typeof ACC_ESCRITURA !== 'undefined') ACC_WR.forEach(a => ACC_ESCRITURA.add(a));
 
-    function asegurarSeccion() {
-      let s = $('#guias-est');
-      if (!s) {
-        s = document.createElement('section');
-        s.id = 'guias-est'; s.className = 'space-y-2';
-        const t = $('#est-tabs');
-        if (t) t.parentNode.insertBefore(s, t);   // antes de «Pendientes / Realizadas…»
-      }
-      return s;
-    }
+    const asegurarSeccion = () => $('#guias-est');
+    const hayActivas = () => !!G.equipo && fichasL().some(f => !esPropia(f) && estF(f.id) === 'abierta' && !enviada(f.id));
 
     function chipFicha(f) {
       if (enviada(f.id)) return chip('✅ Enviada', 'bg-emerald-100 text-emerald-800');
       const e = estF(f.id);
+      if (e === 'abierta' && !G.equipo) return chip('⏳ Espere su equipo', 'bg-slate-100 text-slate-600');
       if (e === 'abierta') return chip('✏️ Complete ahora', 'bg-amber-300 text-slate-900 gpulso');
       if (e === 'cerrada') return chip('⛔ Cerrada', 'bg-rose-100 text-rose-800');
       return chip('🔒 Aún no habilitada', 'bg-slate-100 text-slate-600');
     }
 
     function htmlFormFicha(f) {
-      const est = estF(f.id), edit = est === 'abierta', F = G.fichas[f.id] || { d: {} };
+      const est = estF(f.id), edit = est === 'abierta' && !!G.equipo, F = G.fichas[f.id] || { d: {} };
       const exp = equipoPor(f.expone);
       let h = '';
-      if (edit) h += '<div class="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm p-2">✅ El docente habilitó esta ficha. Escuche a <b>' + esc(exp ? exp.nombre : 'el equipo que expone') + '</b> y complétela mientras expone. Se guarda sola; al terminar pinche «Enviar ficha».</div>';
+      if (est === 'abierta' && !G.equipo) h += '<div class="rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm p-2">⏳ El docente habilitó esta ficha, pero aún no le asigna un equipo. Avísele: así sabrá si esta ficha le corresponde o si su equipo expone este tema.</div>';
+      else if (edit) h += '<div class="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm p-2">✅ El docente habilitó esta ficha. Escuche a <b>' + esc(exp ? exp.nombre : 'el equipo que expone') + '</b> y complétela mientras expone. Se guarda sola; al terminar pinche «Enviar ficha».</div>';
       else if (est === 'cerrada') h += '<div class="rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-sm p-2">⛔ El docente cerró esta ficha: ya no se pueden hacer cambios.' + (enviada(f.id) ? ' Su ficha quedó enviada.' : '') + '</div>';
       else h += '<div class="rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm p-2">🔒 Esta ficha todavía no está habilitada. No la complete antes: se activará cuando el docente la habilite en <b>' + esc(f.hito) + '</b> y recibirá un aviso.</div>';
-      h += '<p class="text-xs text-slate-500">Complete esta ficha mientras escucha a este equipo. Si este es el tema de su equipo, no la complete: usted está exponiendo.</p>';
+      h += '<p class="text-xs text-slate-500">Complete esta ficha mientras escucha al equipo que expone.</p>';
       let sec = '';
       f.q.forEach((q, i) => {
         const k = 'q' + (i + 1), v = (F.d || {})[k], dis = edit ? '' : ' disabled';
@@ -170,7 +194,7 @@
         h += '<div class="space-y-1"><div class="text-sm font-semibold">' + (i + 1) + '. ' + esc(q.t) + '</div><div class="text-xs text-slate-500">' + esc(q.a) + '</div>';
         if (q.k === 'esc') {
           const n = v && typeof v === 'object' ? Number(v.n) || 0 : 0, t = v && typeof v === 'object' ? v.t || '' : '';
-          h += '<div class="flex gap-2">' + [1, 2, 3].map(x => '<label class="gesc flex-1 text-center rounded-xl border px-2 py-2 text-sm font-bold bg-white"><input type="radio" class="sr-only" name="gf-' + f.id + '-' + k + '" data-gf="' + f.id + '" data-q="' + k + '" data-esc="n" value="' + x + '"' + (n === x ? ' checked' : '') + dis + '>' + x + '</label>').join('') + '</div>' +
+          h += '<div class="flex gap-2">' + [1, 2, 3].map(x => '<label class="gesc' + (n === x ? ' sel' : '') + ' flex-1 text-center rounded-xl border px-2 py-2 text-sm font-bold bg-white"><input type="radio" class="sr-only" name="gf-' + f.id + '-' + k + '" data-gf="' + f.id + '" data-q="' + k + '" data-esc="n" value="' + x + '"' + (n === x ? ' checked' : '') + dis + '>' + x + '</label>').join('') + '</div>' +
             '<textarea rows="2" data-gf="' + f.id + '" data-q="' + k + '" data-esc="t" placeholder="Justifique en una línea…" class="w-full border rounded-xl px-3 py-2 text-sm disabled:bg-slate-100"' + dis + '>' + esc(t) + '</textarea>';
         } else {
           h += '<textarea rows="3" data-gf="' + f.id + '" data-q="' + k + '" class="w-full border rounded-xl px-3 py-2 text-sm disabled:bg-slate-100"' + dis + '>' + esc(typeof v === 'string' ? v : '') + '</textarea>';
@@ -183,11 +207,88 @@
       return h;
     }
 
+    /* ----- Nota y avance ----- */
+    function calcular() {
+      const acts = (S.datos && S.datos.actividades) || [];
+      let pa = 0, ma = 0, hechas = 0, evald = 0;
+      acts.forEach(a => {
+        const m = Number(a.puntaje_max) || 0; ma += m;
+        let r = null; try { r = respuestaDe(a); } catch (_) { r = null; }
+        if (r) { hechas++; if (r.estado === 'evaluada') { evald++; pa += Math.min(m, Math.max(0, Number(r.puntaje_final) || 0)); } }
+      });
+      const rubT = cont('rubT'), rubP = cont('rubP'), eT = (G.ev && G.ev.T) || [], eP = G.ev && G.ev.P;
+      const pt = eT.length ? eT.reduce((t, x) => t + ptsDe(x.niv, rubT), 0) / eT.length : 0;
+      const mias = fichasL().filter(f => !esPropia(f));
+      const comps = [
+        { k: 'A', nom: 'Preguntas de la aplicación', w: 40, pts: pa, max: ma, aplica: acts.length > 0 && ma > 0, ok: acts.length > 0 && evald === acts.length, hechas: hechas, total: acts.length },
+        { k: 'T', nom: 'Rúbrica de terreno (su equipo)', w: 40, pts: pt, max: rubT.length * 2, aplica: true, ok: eT.length > 0 },
+        { k: 'P', nom: 'Fichas de aprendizaje entre pares', w: 20, pts: eP ? ptsDe(eP.niv, rubP) : 0, max: rubP.length * 2, aplica: true, ok: !!eP }
+      ];
+      const r = combinar(comps);
+      r.comps = comps; r.A = comps[0]; r.T = comps[1]; r.P = comps[2];
+      r.completo = r.completo && G.cargada;
+      r.fEnv = mias.filter(f => enviada(f.id)).length; r.fTot = mias.length;
+      return r;
+    }
+    function htmlAvance(c) {
+      const acts = (S.datos && S.datos.actividades) || [];
+      const grupos = [];
+      grupos.push(acts.map(a => { let r = null; try { r = respuestaDe(a); } catch (_) {} return !!r; }));
+      if (G.cargada) {
+        grupos.push(fichasL().filter(f => !esPropia(f)).map(f => enviada(f.id)));
+        grupos.push([c.T.ok, c.P.ok]);
+      }
+      const g = grupos.filter(x => x.length);
+      const todos = [].concat.apply([], g), hechas = todos.filter(Boolean).length;
+      const bar = g.map(x => '<div class="flex gap-1" style="flex:' + x.length + ' 1 0%">' + x.map(v => v
+        ? '<div class="h-4 flex-1 rounded-md" style="background:#39ff14;box-shadow:0 0 8px #39ff14"></div>'
+        : '<div class="h-4 flex-1 rounded-md" style="background:#ef4444"></div>').join('') + '</div>').join('<div style="width:6px"></div>');
+      const ok = v => v ? '✓' : '⏳';
+      const det = '<div class="text-[11px] mt-1 opacity-95">📝 Preguntas ' + c.A.hechas + '/' + c.A.total +
+        (G.cargada ? ' · 📘 Fichas ' + c.fEnv + '/' + c.fTot + ' · 📊 Terreno ' + ok(c.T.ok) + ' · 📋 Evaluación de fichas ' + ok(c.P.ok) : '') + '</div>';
+      const box = c.completo
+        ? '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-3 py-2 text-center" style="background:#fde047;color:#1e293b;box-shadow:0 0 0 3px rgba(253,224,71,.55),0 0 14px rgba(253,224,71,.8)"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-3xl font-extrabold leading-none">' + fmt1(c.nota) + '</div></button>'
+        : '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-3 py-2 text-center" style="background:rgba(255,255,255,.2);border:2px dashed rgba(255,255,255,.7);color:inherit"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-xl font-extrabold leading-none">—</div><div class="text-[10px] mt-0.5">pendiente</div></button>';
+      return '<div id="g-avance" class="flex items-stretch gap-3"><div class="flex-1 min-w-0"><div class="flex" style="min-height:16px">' + bar + '</div>' +
+        '<div class="flex justify-between text-[11px] mt-1.5 font-semibold"><span><span style="color:#39ff14">●</span> Realizadas: ' + hechas + '</span><span><span style="color:#ff6b6b">●</span> Pendientes: ' + (todos.length - hechas) + '</span></div>' + det + '</div>' + box + '</div>';
+    }
+    function pintarAvance() {
+      const info = $('#est-info');
+      if (!info) return;
+      const h = htmlAvance(calcular());
+      const ex = $('#g-avance');
+      if (ex) { ex.outerHTML = h; return; }
+      const seg = info.querySelector('.h-4.flex-1'), fila = seg && seg.closest('div.flex.gap-1');
+      const raiz = fila && fila.parentElement;
+      if (raiz && raiz !== info && info.contains(raiz)) { raiz.outerHTML = h; return; }
+      const barra = info.querySelector('.rounded-full.overflow-hidden');
+      if (barra) { barra.outerHTML = h; return; }
+      (info.firstElementChild || info).insertAdjacentHTML('beforeend', '<div class="mt-3">' + h + '</div>');
+    }
+    function htmlNota(c) {
+      const fila = x => '<tr class="border-t"><td class="p-2">' + esc(x.nom) + '</td><td class="p-2 text-center">' + x.w + ' %</td>' +
+        '<td class="p-2 text-center">' + (x.aplica ? (x.ok || x.pts ? fmt1(x.pts) + ' / ' + x.max + ' (' + pct(x) + ' %)' : '— / ' + x.max) : 'No aplica') + '</td>' +
+        '<td class="p-2 text-center">' + (!x.aplica ? '—' : x.ok ? '✅ Evaluado' : '⏳ Pendiente') + '</td></tr>';
+      const coment = [];
+      ((G.ev && G.ev.T) || []).forEach(x => { if (x.obs) coment.push('📊 Terreno: ' + x.obs); });
+      if (G.ev && G.ev.P && G.ev.P.obs) coment.push('📋 Fichas: ' + G.ev.P.obs);
+      return '<div class="rounded-2xl p-3 space-y-2" style="' + (c.completo ? 'background:#fef9c3;border:2px solid #facc15' : 'background:#f8fafc;border:2px dashed #cbd5e1') + '">' +
+        '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse" style="min-width:420px"><thead><tr class="bg-slate-800 text-white"><th class="p-2 text-left">Parte</th><th class="p-2">Peso</th><th class="p-2">Puntaje</th><th class="p-2">Estado</th></tr></thead><tbody>' + c.comps.map(fila).join('') + '</tbody></table></div>' +
+        (c.completo
+          ? '<div class="text-center"><div class="text-xs font-bold uppercase tracking-wide text-slate-600">Su nota final de la salida a terreno</div><div class="text-5xl font-extrabold">' + fmt1(c.nota) + '</div><div class="text-xs text-slate-600">Logro total: ' + Math.round(c.frac * 100) + ' % · escala de 1,0 a 7,0 con 60 % de exigencia</div></div>'
+          : '<p class="text-sm text-slate-700">⏳ Su nota final aparecerá aquí cuando estén evaluadas las tres partes. Faltan: <b>' + (c.ap.filter(x => !x.ok).map(x => x.nom).join(', ') || '—') + '</b>.</p>') +
+        '<p class="text-[11px] text-slate-500">Las tres partes se juntan en una sola nota: no se suman notas, se suman los porcentajes de logro (40 % aplicación, 40 % terreno, 20 % fichas).</p>' +
+        (coment.length ? '<div class="text-xs rounded-xl bg-white p-2 space-y-1"><b>Comentarios de los docentes</b>' + coment.map(t => '<div>' + esc(t) + '</div>').join('') + '</div>' : '') + '</div>';
+    }
+
     function htmlTodo() {
-      const fl = fichasL(), eqs = equipos(), mi = equipoPor(G.equipo);
+      const fl = fichasL(), eqs = equipos(), mi = equipoPor(G.equipo), c = calcular();
       const mias = fl.filter(f => !esPropia(f));
-      const activas = mias.filter(f => estF(f.id) === 'abierta' && !enviada(f.id));
-      let h = '<div class="flex items-center gap-2 px-1 pt-1"><span class="text-xl">📘</span><h2 class="font-extrabold text-lg">Guías de la salida</h2></div>';
+      const activas = mias.filter(f => !!G.equipo && estF(f.id) === 'abierta' && !enviada(f.id));
+      const rubT = cont('rubT'), rubP = cont('rubP'), eT = (G.ev && G.ev.T) || [], eP = G.ev && G.ev.P;
+      const selT = id => { const v = eT.map(x => x.niv[id]).filter(n => n !== undefined && n !== null && n !== ''); return v.length ? Math.round(v.reduce((a, b) => a + Number(b), 0) / v.length) : undefined; };
+      const selP = id => eP && eP.niv[id] !== undefined ? Number(eP.niv[id]) : undefined;
+      let h = '<div class="flex items-center gap-2 px-1 pt-1"><span class="text-xl">📘</span><h2 class="font-extrabold text-lg">Guía de la salida</h2></div>';
       if (activas.length) h += '<div class="rounded-2xl bg-amber-100 border-2 border-amber-400 p-3 gpulso space-y-1"><div class="font-extrabold">🔔 Ya puede completar su ficha</div>' +
         activas.map(f => '<button data-accion="g-abrir-ficha" data-f="' + f.id + '" class="block w-full text-left rounded-xl bg-white px-3 py-2 text-sm font-semibold">📝 Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + ' <span class="font-normal text-slate-500">(' + esc(f.hito) + ')</span> ➜</button>').join('') + '</div>';
       h += det('rec', '🗺️', 'El recorrido de la salida', htmlRecorrido(cont('recorrido')));
@@ -196,24 +297,31 @@
       h += det('hoja', '🧾', 'Hoja de ruta de su equipo',
         mi ? htmlHoja(mi) : '<div class="rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm p-3">⏳ El docente aún no le asigna un equipo. Cuando lo haga, aquí aparecerá la hoja de ruta de su equipo.</div>',
         mi ? chip(esc(colDe(mi.color)[2]), 'bg-white text-slate-700 border') : '');
-      h += det('rubt', '📊', 'Rúbrica de terreno (la evalúan los docentes)', htmlRubT(cont('rubT')));
+      h += det('rubt', '📊', 'Rúbrica de terreno (la evalúan los docentes)',
+        htmlRubT(rubT, selT, eT.length ? '<div class="rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-sm p-2">✔ Su equipo ya fue evaluado: <b>' + fmt1(c.T.pts) + ' / ' + c.T.max + '</b> puntos. Los niveles marcados aparecen con borde azul.</div>' : '<div class="rounded-xl bg-slate-50 border text-slate-600 text-xs p-2">Aún no evalúan a su equipo. Cuando lo hagan, el nivel logrado en cada indicador quedará marcado.</div>'),
+        eT.length ? chip('Evaluada', 'bg-emerald-100 text-emerald-800') : '');
       h += '<div class="px-1 pt-2"><div class="font-extrabold">📝 Fichas de aprendizaje entre pares</div>' +
-        '<p class="text-xs text-slate-600">Usted completa ' + (G.equipo ? mias.length : fl.length) + ' fichas, una en cada visita, cuando el docente la habilite. ' +
-        (G.equipo ? 'La ficha del tema que expone su equipo no se completa.' : 'Cuando el docente le asigne un equipo, su propia ficha quedará fuera.') + '</p></div>';
+        '<p class="text-xs text-slate-600">Usted completa ' + (G.equipo ? mias.length : fl.length - 1) + ' fichas, una en cada visita, cuando el docente la habilite. ' +
+        (G.equipo ? 'La ficha del tema que expone su equipo no le corresponde.' : 'Cuando el docente le asigne un equipo, sabrá cuál ficha no le corresponde.') + '</p></div>';
+      if (!G.equipo) h += '<div class="rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm p-2">⏳ Aún no tiene equipo asignado: no podrá completar fichas hasta que el docente se lo asigne.</div>';
       fl.forEach(f => {
         const exp = equipoPor(f.expone);
         if (esPropia(f)) {
-          h += '<div class="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-3 py-3 text-sm">🎤 <b>Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '</b> · ' + esc(f.hito) + ': su equipo expone este tema, por eso <b>no completa</b> esta ficha.</div>';
+          h += '<div class="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-100 px-3 py-3 text-sm text-slate-600 flex items-start gap-2"><span class="text-xl">🚫</span><span class="flex-1"><b>Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '</b> · ' + esc(f.hito) + '<br>Su equipo expone este tema, por eso <b>no la completa</b>.</span>' + chip('No aplica', 'bg-slate-300 text-slate-700') + '</div>';
         } else {
           h += det(f.id, '📝', 'Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '<span class="block text-xs font-normal text-slate-500">' + esc(f.hito) + (exp ? ' · Expone ' + esc(exp.nombre.split(' · ')[0]) : '') + '</span>', htmlFormFicha(f), chipFicha(f));
         }
       });
-      h += det('rubp', '📋', 'Rúbrica de las fichas de aprendizaje entre pares', htmlRubP(cont('rubP')));
+      h += det('rubp', '📋', 'Rúbrica de las fichas de aprendizaje entre pares',
+        htmlRubP(rubP, selP, eP ? '<div class="rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-sm p-2">✔ Sus fichas ya fueron evaluadas: <b>' + fmt1(c.P.pts) + ' / ' + c.P.max + '</b> puntos. Los niveles marcados aparecen con borde azul.</div>' : ''),
+        eP ? chip('Evaluada', 'bg-emerald-100 text-emerald-800') : '');
+      h += det('nota', '🏁', 'Mi nota de la salida', htmlNota(c), c.completo ? chip('Nota ' + fmt1(c.nota), 'bg-yellow-300 text-slate-900') : chip('Pendiente', 'bg-slate-100 text-slate-600'));
       return h;
     }
 
     function dibujar(forzar) {
       const s = asegurarSeccion();
+      if (!s) return;
       const a = document.activeElement;
       if (!forzar && a && s.contains(a) && /^(TEXTAREA|INPUT)$/.test(a.tagName)) { G.pend = true; return; }
       G.pend = false;
@@ -223,7 +331,7 @@
     }
     document.addEventListener('focusout', () => { if (G.pend) setTimeout(() => dibujar(), 400); });
 
-    function guardarLocal() { LS.set('guias:' + G.rut, { cont: G.cont, vc: G.vc, estf: G.estf, equipo: G.equipo }); }
+    function guardarLocal() { LS.set('guias:' + G.rut, { cont: G.cont, vc: G.vc, estf: G.estf, equipo: G.equipo, ev: G.ev }); }
     function fusionar(srv) {
       const r = {};
       Object.keys(srv || {}).forEach(f => { r[f] = { d: srv[f].d || {}, e: srv[f].e || '' }; });
@@ -238,13 +346,14 @@
       if (r.cont) G.cont = r.cont;
       G.vc = r.vc || G.vc; G.estf = r.estf || {}; G.equipo = r.equipo || '';
       if (r.fichas) G.fichas = fusionar(r.fichas);
+      if (r.ev) G.ev = r.ev;
       G.cargada = true; guardarLocal();
       if (prev) avisarCambios(prev);
-      dibujar();
+      dibujar(); refrescarPantalla();
     }
     function avisarCambios(prev) {
       const fl = fichasL();
-      const nuevas = fl.filter(f => !esPropia(f) && G.estf[f.id] === 'abierta' && prev[f.id] !== 'abierta' && !enviada(f.id));
+      const nuevas = !G.equipo ? [] : fl.filter(f => !esPropia(f) && G.estf[f.id] === 'abierta' && prev[f.id] !== 'abierta' && !enviada(f.id));
       const cerradas = fl.filter(f => !esPropia(f) && G.estf[f.id] === 'cerrada' && prev[f.id] === 'abierta');
       if (nuevas.length) {
         try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (_) {}
@@ -290,6 +399,7 @@
         if (enviar) { aviso('Ficha enviada. ¡Gracias!'); dibujar(true); }
         return true;
       } catch (e) {
+        if (e.codigo === 'NO_APLICA' || e.codigo === 'SIN_EQUIPO') { F.dirty = false; LS.del(lsKey(fid)); aviso(e.message, 'error'); await refrescar(true); return false; }
         if (e.codigo === 'FICHA_CERRADA') { F.dirty = false; LS.del(lsKey(fid)); aviso(e.message, 'error'); await refrescar(false); return false; }
         marcar(fid, '📵 Sin conexión: guardado en su teléfono');
         if (!silencioso) aviso('No se pudo enviar: ' + e.message + ' Su respuesta quedó guardada en el teléfono.', 'error');
@@ -317,7 +427,11 @@
       const F = G.fichas[fid] = G.fichas[fid] || { d: {}, e: '' };
       if (t.dataset.esc) {
         const o = (F.d[q] && typeof F.d[q] === 'object') ? F.d[q] : { n: 0, t: '' };
-        if (t.dataset.esc === 'n') o.n = Number(t.value) || 0; else o.t = t.value;
+        if (t.dataset.esc === 'n') {
+          o.n = Number(t.value) || 0;
+          const g = t.closest('.gesc') && t.closest('.gesc').parentElement;
+          if (g) g.querySelectorAll('.gesc').forEach(l => l.classList.toggle('sel', l.contains(t)));
+        } else o.t = t.value;
         F.d[q] = o;
       } else F.d[q] = t.value;
       F.dirty = true;
@@ -339,7 +453,11 @@
           const fi = fichasL().find(x => x.id === f), falta = fi ? faltantes(fi) : [];
           if (falta.length) return aviso('Faltan por responder las preguntas: ' + falta.join(', ') + '. En las preguntas 9 y 10 marque 1, 2 o 3 y escriba la justificación.', 'error');
           await guardarFicha(f, true, false);
+        } else if (a === 'g-ir-guia') {
+          ABIERTOS.add('nota'); S.tab = 'guia'; renderContenidoEst();
+          setTimeout(() => { const d = document.querySelector('details.gd[data-gd="nota"]'); if (d) { d.open = true; try { d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {} } }, 150);
         } else if (a === 'g-abrir-ficha') {
+          if (S.tab !== 'guia') { S.tab = 'guia'; renderContenidoEst(); }
           if (!ocultoModal()) cerrarModal();
           ABIERTOS.add(f); dibujar(true);
           const d = document.querySelector('details.gd[data-gd="' + f + '"]');
@@ -349,19 +467,47 @@
     });
 
     function montar() {
-      asegurarSeccion();
       const rut = S.usuario && S.usuario.key;
       if (!rut) return;
       if (G.rut !== rut) {
-        Object.assign(G, { rut: rut, cont: {}, estf: {}, equipo: '', fichas: {}, vc: '', cargada: false, html: '' });
+        Object.assign(G, { rut: rut, cont: {}, estf: {}, equipo: '', fichas: {}, vc: '', cargada: false, html: '', ev: { T: [], P: null } });
         const l = LS.get('guias:' + rut);
-        if (l) { G.cont = l.cont || {}; G.vc = l.vc || ''; G.estf = l.estf || {}; G.equipo = l.equipo || ''; G.fichas = fusionar({}); }
+        if (l) { G.cont = l.cont || {}; G.vc = l.vc || ''; G.estf = l.estf || {}; G.equipo = l.equipo || ''; G.ev = l.ev || { T: [], P: null }; G.fichas = fusionar({}); }
         refrescar(true);
       }
       dibujar();
     }
+    // Pestaña «Guía» (junto a «Pendientes») y cuadro de nota final junto al avance
+    function refrescarPantalla() {
+      try { if (typeof renderTabsEst === 'function') renderTabsEst(); } catch (_) {}
+      try { pintarAvance(); } catch (e) { console.error(e); }
+    }
+    const _renderTabsGuias = renderTabsEst;
+    renderTabsEst = function () {
+      _renderTabsGuias();
+      const nav = $('#est-tabs');
+      if (!nav) return;
+      nav.querySelectorAll('[data-tab="guia"]').forEach(x => x.remove());
+      const pend = nav.querySelector('[data-tab="pendientes"]');
+      const html = '<button data-accion="tab-est" data-tab="guia" class="py-2 rounded-xl flex flex-col items-center leading-tight ' + (S.tab === 'guia' ? 'tab-activa' : '') + '"><span class="text-lg">📘</span><span>Guía' + (hayActivas() ? ' 🔔' : '') + '</span></button>';
+      if (pend) pend.insertAdjacentHTML('afterend', html); else nav.insertAdjacentHTML('afterbegin', html);
+      const n = nav.children.length;
+      nav.className = 'grid ' + (n >= 6 ? 'grid-cols-6' : n === 5 ? 'grid-cols-5' : 'grid-cols-4') + ' gap-1 bg-white/95 rounded-2xl shadow p-1 text-xs font-semibold';
+      if (n >= 6) nav.querySelectorAll('button').forEach(b => { b.style.fontSize = '10px'; });
+    };
+    const _renderContenidoGuias = renderContenidoEst;
+    renderContenidoEst = function () {
+      if (S.tab !== 'guia') return _renderContenidoGuias();
+      renderTabsEst();
+      if (typeof detenerMapa === 'function') detenerMapa();
+      const box = $('#est-contenido');
+      if (!box) return;
+      const ex = $('#guias-est');
+      if (!ex || !box.contains(ex)) { box.innerHTML = '<section id="guias-est" class="space-y-2"></section>'; G.html = ''; }
+      montar();
+    };
     const _renderEstGuias = renderEstudiante;
-    renderEstudiante = function () { _renderEstGuias(); try { montar(); } catch (e) { console.error(e); } };
+    renderEstudiante = function () { _renderEstGuias(); try { montar(); refrescarPantalla(); } catch (e) { console.error(e); } };
 
     // Revisión periódica (el estado de las fichas cambia cuando el docente las habilita o las cierra)
     setInterval(() => {
@@ -426,20 +572,23 @@
     function pintar() {
       if (S.tabDoc !== 'guias' || !GD) return;
       const y = window.scrollY;
-      const subs = [['fichas', '▶️ Habilitar fichas'], ['equipos', '👥 Equipos'], ['rubt', '📊 Rúbrica de terreno'], ['rubp', '📋 Evaluar fichas'], ['contenido', '✏️ Contenido']];
+      const subs = [['fichas', '▶️ Habilitar fichas'], ['equipos', '👥 Equipos'], ['rubt', '📊 Rúbrica de terreno'], ['rubp', '📋 Evaluar fichas'], ['notas', '🏁 Notas'], ['contenido', '✏️ Contenido']];
       const titular = typeof esTitular === 'function' ? esTitular() : true;
       const banner = titular ? '' : '<div class="rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-sm p-3 mb-3">🤝 Ingresó como ayudante: <b>' + esc(GD.yo.nombre) + '</b>.</div>';
       $('#doc-contenido').innerHTML = banner +
         '<div class="flex gap-1 overflow-x-auto bg-white/95 rounded-2xl shadow p-1 text-sm font-semibold mb-3">' + subs.map(([k, t]) =>
-          '<button data-accion="g-sub" data-s="' + k + '" class="px-3 py-2 rounded-xl whitespace-nowrap ' + (gsub() === k ? 'tab-activa' : '') + '">' + t + '</button>').join('') + '</div>' +
-        '<div id="g-cuerpo">' + ({ fichas: pFichas, equipos: pEquipos, rubt: pRubT, rubp: pRubP, contenido: pContenido }[gsub()] || pFichas)() + '</div>';
+          '<button data-accion="g-sub" data-s="' + k + '" class="px-3 py-2 rounded-xl whitespace-nowrap ' + (gsub() === k ? 'tab-activa' : '') + '">' + t + '</button>').join('') +
+        '<button data-accion="g-refrescar" class="ml-auto px-3 py-2 rounded-xl whitespace-nowrap bg-slate-100" title="Traer lo último guardado por estudiantes y otros docentes">🔄 Actualizar</button></div>' +
+        '<div id="g-cuerpo">' + ({ fichas: pFichas, equipos: pEquipos, rubt: pRubT, rubp: pRubP, notas: pNotas, contenido: pContenido }[gsub()] || pFichas)() + '</div>';
       window.scrollTo(0, y);
     }
 
     /* ----- Habilitar / cerrar fichas ----- */
     function pFichas() {
       const fl = fichasL(), est = activos();
-      return '<div class="rounded-2xl bg-white/95 shadow p-4 text-sm space-y-1"><b>Cómo funciona</b>' +
+      const sinEq = est.filter(s => !miAsig(s)).length;
+      return (sinEq ? '<div class="rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-sm p-3 mb-3">⚠️ <b>' + sinEq + '</b> estudiantes no tienen equipo. Mientras no se los asigne en «Equipos», no podrán completar ninguna ficha.</div>' : '') +
+        '<div class="rounded-2xl bg-white/95 shadow p-4 text-sm space-y-1"><b>Cómo funciona</b>' +
         '<p>Cada ficha queda <b>bloqueada</b> hasta que usted la habilite, así nadie la completa antes. Al habilitarla, los estudiantes reciben un aviso en su teléfono. Con «Cerrar» ya no se puede escribir más (lo enviado queda guardado).</p></div>' +
         '<div class="space-y-3 mt-3">' + fl.map(f => {
           const e = GD.estf[f.id] || 'pend', exp = equipos().find(x => x.id === f.expone);
@@ -490,16 +639,9 @@
       const mio = (GD.evalT[eq] || {})[GD.yo.id];
       if (!GD.dT[eq]) GD.dT[eq] = { niv: Object.assign({}, mio && mio.niv), obs: (mio && mio.obs) || '' };
       const d = GD.dT[eq];
-      let dim = '', h = '<div class="flex gap-2 overflow-x-auto pb-1">' + equipos().map(e => { const c = colDe(e.color), on = e.id === eq; return '<button data-accion="g-eq" data-e="' + e.id + '" class="shrink-0 px-3 py-2 rounded-xl text-sm font-bold" style="background:' + (on ? c[1] : c[0]) + ';color:' + (on ? '#fff' : '#1e293b') + ';border:2px solid ' + c[1] + '">' + esc(e.nombre.split(' · ')[0]) + '</button>'; }).join('') + '</div>' +
-        '<div class="rounded-2xl bg-white/95 shadow p-3 mt-2 text-sm"><b>' + esc(nomEq(eq)) + '</b> · Evalúa: <b>' + esc(GD.yo.nombre) + '</b><br><span class="text-xs text-slate-500">Marque el nivel de cada indicador. El puntaje se guarda solo y puede cambiarlo cuando quiera.</span></div>';
-      rub.forEach(r => {
-        if (r.dim !== dim) { dim = r.dim; h += '<div class="pt-3 font-extrabold text-sm uppercase tracking-wide text-indigo-900">' + esc(dim) + ' <span class="text-[11px] normal-case font-normal text-slate-500">· ' + esc(DIMD[dim] || '') + '</span></div>'; }
-        const v = d.niv[r.id];
-        h += '<div class="bg-white/95 rounded-2xl shadow p-3 space-y-2 mt-2"><div class="font-bold text-sm">' + esc(r.id) + ' · ' + esc(r.nom) + '</div>' +
-          [[2, 'Logrado · 2 pts', r.L, 'text-emerald-800'], [1, 'Medianamente logrado · 1 pt', r.M, 'text-amber-800'], [0, 'No observado · 0 pts', r.N, 'text-rose-800']].map(([n, t, x, c]) =>
-            '<label class="gopt flex gap-2 items-start rounded-xl border p-2 text-sm cursor-pointer"><input type="radio" name="gt-' + esc(r.id) + '" data-gt="' + esc(r.id) + '" value="' + n + '"' + (v === n ? ' checked' : '') + ' class="mt-1"><span><b class="' + c + '">' + t + '.</b> ' + esc(x) + '</span></label>').join('') +
-          (r.v ? '<div class="text-[11px] text-slate-500">🔎 Se verifica con: ' + esc(r.v) + '</div>' : '') + '</div>';
-      });
+      let h = '<div class="flex gap-2 overflow-x-auto pb-1">' + equipos().map(e => { const c = colDe(e.color), on = e.id === eq; return '<button data-accion="g-eq" data-e="' + e.id + '" class="shrink-0 px-3 py-2 rounded-xl text-sm font-bold" style="background:' + (on ? c[1] : c[0]) + ';color:' + (on ? '#fff' : '#1e293b') + ';border:2px solid ' + c[1] + '">' + esc(e.nombre.split(' · ')[0]) + '</button>'; }).join('') + '</div>' +
+        '<div class="rounded-2xl bg-white/95 shadow p-3 mt-2 text-sm"><b>' + esc(nomEq(eq)) + '</b> · Evalúa: <b>' + esc(GD.yo.nombre) + '</b><br><span class="text-xs text-slate-500">Pinche la celda del nivel logrado en cada indicador: queda marcada con borde azul. El puntaje se guarda solo y puede cambiarlo cuando quiera.</span></div>' +
+        '<div class="mt-2">' + tablaRub(rub, { edit: true, attr: 'gt', sel: id => d.niv[id] }) + '</div>';
       h += '<div class="bg-white/95 rounded-2xl shadow p-3 mt-3 space-y-2"><textarea data-gtobs rows="3" placeholder="Retroalimentación breve (solo sobre el trabajo evaluado)" class="w-full border rounded-xl px-3 py-2 text-sm">' + esc(d.obs) + '</textarea>' +
         '<div id="g-tot" class="text-sm"></div><div id="g-ev-otros" class="text-xs text-slate-600"></div><span id="g-gt-st" class="text-xs"></span></div>';
       setTimeout(totalesT, 0);
@@ -530,19 +672,32 @@
     }
 
     /* ----- Evaluar fichas de aprendizaje entre pares (G7) ----- */
+    function infoP(e) {
+      const k = rutK(e.rut), a = miAsig(e), fp = GD.fp[k] || {};
+      const aplic = fichasL().filter(f => a !== f.expone);
+      const env = aplic.filter(f => fp[f.id] === 'enviada').length, bor = aplic.filter(f => fp[f.id] === 'borrador').length;
+      return { k: k, e: e, a: a, env: env, bor: bor, deben: aplic.length, ev: GD.evalP[k], lista: aplic.length > 0 && env >= aplic.length };
+    }
     function pRubP() {
-      const F = GD.fP = GD.fP || { q: '' }, fl = fichasL(), max = cont('rubP').length * 2;
-      const lista = activos().filter(e => !F.q || String(e.nombre).toLowerCase().indexOf(F.q.toLowerCase()) >= 0);
-      return '<div class="rounded-2xl bg-white/95 shadow p-4 text-sm"><b>Rúbrica de las fichas (' + max + ' puntos).</b> Pinche un estudiante para leer sus fichas y marcar la rúbrica. El puntaje se guarda solo.</div>' +
-        '<input data-gfiltro="qp" value="' + esc(F.q) + '" placeholder="Buscar por nombre" class="border rounded-xl px-3 py-2 text-sm w-full mt-3">' +
-        '<div class="bg-white/95 rounded-2xl shadow mt-3 divide-y">' + (lista.map(e => {
-          const k = rutK(e.rut), a = miAsig(e), fp = GD.fp[k] || {}, env = Object.keys(fp).filter(f => fp[f] === 'enviada').length, deben = fl.length - (a ? 1 : 0), ev = GD.evalP[k];
-          const c = a ? colDe((equipos().find(x => x.id === a) || {}).color)[1] : '#cbd5e1';
-          return '<button data-accion="g-eval-pares" data-r="' + esc(k) + '" class="w-full text-left flex items-center gap-2 p-3"><span class="h-3 w-3 rounded-full shrink-0" style="background:' + c + '"></span>' +
-            '<span class="flex-1 min-w-0"><span class="font-semibold text-sm block truncate">' + esc(e.nombre) + '</span><span class="text-xs text-slate-400">' + esc(e.curso) + '</span></span>' +
-            chip('Fichas ' + env + '/' + deben, env >= deben && deben ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600') +
-            (ev ? chip(ev.pts + '/' + max + ' · ' + fmt1(notaDe(ev.pts, max)), 'bg-indigo-100 text-indigo-800') : chip('Sin evaluar', 'bg-amber-100 text-amber-800')) + '</button>';
-        }).join('') || '<div class="p-6 text-center text-slate-500 text-sm">No hay estudiantes.</div>') + '</div>';
+      const F = GD.fP = GD.fP || { q: '', f: 'todos' }, max = cont('rubP').length * 2;
+      const todos = activos().map(infoP);
+      const FIL = [['todos', 'Todos', () => true], ['listos', '✅ Completaron las fichas', x => x.lista], ['algunos', '✏️ Entregaron alguna', x => x.env > 0 && !x.lista], ['sin', '⏳ Sin evaluar', x => !x.ev], ['eval', '📋 Evaluados', x => !!x.ev]];
+      const fil = FIL.find(x => x[0] === (F.f || 'todos')) || FIL[0];
+      const q = (F.q || '').toLowerCase();
+      const prio = x => x.lista && !x.ev ? 0 : x.lista ? 1 : x.env > 0 ? 2 : 3;
+      const vis = todos.filter(x => fil[2](x) && (!q || String(x.e.nombre).toLowerCase().indexOf(q) >= 0))
+        .sort((a, b) => prio(a) - prio(b) || String(a.e.nombre).localeCompare(String(b.e.nombre), 'es'));
+      GD.navP = vis.map(x => x.k);
+      return '<div class="rounded-2xl bg-white/95 shadow p-4 text-sm"><b>Evaluar las fichas (' + max + ' puntos).</b> Pinche a un estudiante para leer sus fichas y marcar la rúbrica; dentro puede pasar al siguiente. Primero aparecen quienes ya completaron todo y aún no tienen evaluación. El puntaje se guarda solo.</div>' +
+        '<div class="flex gap-2 overflow-x-auto pb-1 mt-3">' + FIL.map(x => '<button data-accion="g-filtro-p" data-f="' + x[0] + '" class="shrink-0 px-3 py-2 rounded-xl text-sm font-semibold ' + (fil[0] === x[0] ? 'tab-activa' : 'bg-white shadow') + '">' + x[1] + ' (' + todos.filter(x[2]).length + ')</button>').join('') + '</div>' +
+        '<input data-gfiltro="qp" value="' + esc(F.q) + '" placeholder="Buscar por nombre" class="border rounded-xl px-3 py-2 text-sm w-full mt-2">' +
+        '<div class="bg-white/95 rounded-2xl shadow mt-3 divide-y">' + (vis.map(x => {
+          const c = x.a ? colDe((equipos().find(y => y.id === x.a) || {}).color)[1] : '#cbd5e1';
+          return '<button data-accion="g-eval-pares" data-r="' + esc(x.k) + '" class="w-full text-left flex items-center gap-2 p-3"><span class="h-3 w-3 rounded-full shrink-0" style="background:' + c + '"></span>' +
+            '<span class="flex-1 min-w-0"><span class="font-semibold text-sm block truncate">' + esc(x.e.nombre) + '</span><span class="text-xs text-slate-400">' + esc(x.e.curso) + (x.a ? '' : ' · sin equipo') + '</span></span>' +
+            chip('Fichas ' + x.env + '/' + x.deben, x.lista ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600') +
+            (x.ev ? chip(x.ev.pts + '/' + max + ' · ' + fmt1(notaDe(x.ev.pts, max)), 'bg-indigo-100 text-indigo-800') : chip('Sin evaluar', 'bg-amber-100 text-amber-800')) + '<span class="text-slate-400">›</span></button>';
+        }).join('') || '<div class="p-6 text-center text-slate-500 text-sm">No hay estudiantes en esta lista.</div>') + '</div>';
     }
     function htmlRespFicha(f, reg) {
       const d = (reg && reg.d) || {};
@@ -561,19 +716,22 @@
       try { r = await api('getFichasDe', { rut: k }); } finally { cargando(false); }
       const fl = fichasL(), rub = cont('rubP'), max = rub.length * 2, mio = GD.evalP[k];
       GD.dP[k] = { niv: Object.assign({}, mio && mio.niv), obs: (mio && mio.obs) || '' };
-      const d = GD.dP[k];
-      modal('<div class="space-y-3 pt-2"><div><div class="font-extrabold text-lg">' + esc(est.nombre) + '</div><div class="text-xs text-slate-500">' + esc(est.curso) + ' · ' + esc(nomEq(GD.asig[k])) + '</div></div>' +
+      const d = GD.dP[k], nav = GD.navP || [], i = nav.indexOf(k);
+      const nom = x => { const e = activos().find(y => rutK(y.rut) === x); return e ? e.nombre : x; };
+      const navH = i >= 0 ? '<div class="flex items-center gap-2 text-xs">' +
+        (i > 0 ? '<button data-accion="g-nav-p" data-r="' + esc(nav[i - 1]) + '" class="px-3 py-2 rounded-xl bg-slate-100 font-semibold">◀ ' + esc(nom(nav[i - 1]).split(' ')[0]) + '</button>' : '<span></span>') +
+        '<span class="flex-1 text-center text-slate-500">' + (i + 1) + ' de ' + nav.length + '</span>' +
+        (i < nav.length - 1 ? '<button data-accion="g-nav-p" data-r="' + esc(nav[i + 1]) + '" class="px-3 py-2 rounded-xl bg-slate-100 font-semibold">' + esc(nom(nav[i + 1]).split(' ')[0]) + ' ▶</button>' : '<span></span>') + '</div>' : '';
+      modal('<div class="space-y-3 pt-2">' + navH + '<div><div class="font-extrabold text-lg">' + esc(est.nombre) + '</div><div class="text-xs text-slate-500">' + esc(est.curso) + ' · ' + esc(nomEq(GD.asig[k])) + '</div></div>' +
         '<div class="space-y-2">' + fl.map(f => {
           const reg = r.fichas[f.id], propia = GD.asig[k] === f.expone;
-          const ch = propia ? chip('Su equipo expone', 'bg-slate-100 text-slate-600') : reg ? (reg.e === 'enviada' ? chip('✅ Enviada', 'bg-emerald-100 text-emerald-800') : chip('✏️ Borrador', 'bg-amber-100 text-amber-800')) : chip('No entregada', 'bg-rose-100 text-rose-800');
-          return '<details class="rounded-xl border"><summary class="flex items-center gap-2 p-2 cursor-pointer text-sm font-semibold"><span class="flex-1">Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '</span>' + ch + '</summary><div class="p-2 space-y-2">' + (propia ? '<p class="text-sm text-slate-500">No corresponde: su equipo expone este tema.</p>' : htmlRespFicha(f, reg)) + '</div></details>';
+          const ch = propia ? chip('🚫 No aplica', 'bg-slate-200 text-slate-700') : reg ? (reg.e === 'enviada' ? chip('✅ Enviada', 'bg-emerald-100 text-emerald-800') : chip('✏️ Borrador', 'bg-amber-100 text-amber-800')) : chip('No entregada', 'bg-rose-100 text-rose-800');
+          return '<details class="rounded-xl border"' + (!propia && reg && reg.e === 'enviada' && f === fl.find(g => GD.asig[k] !== g.expone && r.fichas[g.id]) ? ' open' : '') + '><summary class="flex items-center gap-2 p-2 cursor-pointer text-sm font-semibold"><span class="flex-1">Ficha ' + NUM(fl, f) + ' · ' + esc(f.tema) + '</span>' + ch + '</summary><div class="p-2 space-y-2">' + (propia ? '<p class="text-sm text-slate-500">No corresponde: su equipo expone este tema.</p>' : htmlRespFicha(f, reg)) + '</div></details>';
         }).join('') + '</div>' +
-        '<div class="rounded-xl border-2 border-indigo-200 p-2 space-y-2"><div class="font-bold text-sm">📋 Rúbrica de las fichas</div>' +
-        rub.map(x => '<div class="space-y-1"><div class="text-sm font-semibold">' + esc(x.dim) + ' · ' + esc(x.id) + ' · ' + esc(x.nom) + '</div>' +
-          [[2, 'Logrado · 2 pts', x.L], [1, 'Medianamente logrado · 1 pt', x.M], [0, 'No observado · 0 pts', x.N]].map(([n, t, tx]) =>
-            '<label class="gopt flex gap-2 items-start rounded-xl border p-2 text-xs cursor-pointer"><input type="radio" name="gp-' + esc(x.id) + '" data-gp="' + esc(x.id) + '" data-r="' + esc(k) + '" value="' + n + '"' + (d.niv[x.id] === n ? ' checked' : '') + ' class="mt-0.5"><span><b>' + t + '.</b> ' + esc(tx) + '</span></label>').join('') + '</div>').join('') +
-        '<textarea data-gpobs data-r="' + esc(k) + '" rows="2" placeholder="Retroalimentación breve" class="w-full border rounded-xl px-3 py-2 text-sm">' + esc(d.obs) + '</textarea>' +
-        '<div id="g-ptot" class="text-sm font-bold"></div><span id="g-gp-st" class="text-xs"></span></div></div>');
+        '<div class="rounded-xl border-2 border-indigo-200 p-2 space-y-2"><div class="font-bold text-sm">📋 Rúbrica de las fichas <span class="text-xs font-normal text-slate-500">· pinche la celda del nivel logrado</span></div>' +
+        '<div id="g-rubp-tabla">' + tablaRub(rub, { edit: true, attr: 'gp', rut: k, dims: false, sel: id => d.niv[id] }) + '</div>' +
+        '<textarea data-gpobs data-r="' + esc(k) + '" rows="2" placeholder="Retroalimentación breve (solo sobre su trabajo)" class="w-full border rounded-xl px-3 py-2 text-sm">' + esc(d.obs) + '</textarea>' +
+        '<div id="g-ptot" class="text-sm font-bold"></div><span id="g-gp-st" class="text-xs"></span></div>' + navH + '</div>');
       totalesP(k);
     }
     function totalesP(k) {
@@ -591,6 +749,67 @@
         estadoGuardado('g-gp-st', '✓ Guardado automáticamente');
         if (gsub() === 'rubp') pintar();
       }).catch(e => estadoGuardado('g-gp-st', '⚠ No se guardó: ' + e.message, true));
+    }
+
+    /* ----- Notas de la salida (40 % aplicación · 40 % terreno · 20 % fichas) ----- */
+    function mapaResp() {
+      const m = {};
+      (S.panel.respuestas || []).forEach(r => {
+        const k = rutK(r.rut); if (!k) return;
+        const o = m[k] = m[k] || {};
+        if (!o[r.actividad_id] || (r.estado === 'evaluada' && o[r.actividad_id].estado !== 'evaluada')) o[r.actividad_id] = r;
+      });
+      return m;
+    }
+    function notaDoc(e, mapa) {
+      const k = rutK(e.rut), acts = S.panel.actividades || [], rs = mapa[k] || {};
+      let pa = 0, ma = 0, ev = 0;
+      acts.forEach(a => {
+        const m = Number(a.puntaje_max) || 0; ma += m;
+        const r = rs[a.id];
+        if (r && r.estado === 'evaluada') { ev++; pa += Math.min(m, Math.max(0, Number(r.puntaje_final) || 0)); }
+      });
+      const rubT = cont('rubT'), rubP = cont('rubP'), eq = miAsig(e), et = eq ? GD.evalT[eq] || {} : {};
+      const tt = Object.keys(et).map(x => et[x]), eP = GD.evalP[k];
+      const pt = tt.length ? tt.reduce((t, x) => t + ptsDe(x.niv, rubT), 0) / tt.length : 0;
+      const comps = [
+        { k: 'A', w: 40, pts: pa, max: ma, aplica: acts.length > 0 && ma > 0, ok: acts.length > 0 && ev === acts.length },
+        { k: 'T', w: 40, pts: pt, max: rubT.length * 2, aplica: true, ok: tt.length > 0 },
+        { k: 'P', w: 20, pts: eP ? ptsDe(eP.niv, rubP) : 0, max: rubP.length * 2, aplica: true, ok: !!eP }];
+      const r = combinar(comps); r.comps = comps; r.A = comps[0]; r.T = comps[1]; r.P = comps[2];
+      return r;
+    }
+    function filasNotas() {
+      const mapa = mapaResp(), F = GD.fN = GD.fN || { curso: '', q: '' }, q = (F.q || '').toLowerCase();
+      return activos().filter(e => (!F.curso || e.curso === F.curso) && (!q || String(e.nombre).toLowerCase().indexOf(q) >= 0))
+        .map(e => ({ e: e, k: rutK(e.rut), n: notaDoc(e, mapa) })).sort((a, b) => String(a.e.curso).localeCompare(String(b.e.curso), 'es') || String(a.e.nombre).localeCompare(String(b.e.nombre), 'es'));
+    }
+    function pNotas() {
+      const F = GD.fN = GD.fN || { curso: '', q: '' };
+      const cursos = Array.from(new Set(activos().map(e => e.curso).filter(Boolean))).sort();
+      const filas = filasNotas(), comp = filas.filter(x => x.n.completo);
+      const prom = comp.length ? comp.reduce((t, x) => t + x.n.nota, 0) / comp.length : 0;
+      const celda = c => !c.aplica ? '<span class="text-slate-400">n/a</span>' : (c.ok ? '✅ ' : '⏳ ') + fmt1(c.pts) + '/' + c.max;
+      return '<div class="rounded-2xl bg-white/95 shadow p-4 text-sm"><b>Nota de la salida a terreno.</b> 40 % preguntas de la aplicación + 40 % rúbrica de terreno + 20 % fichas entre pares (se suman porcentajes de logro; escala de 1,0 a 7,0 con 60 % de exigencia). La nota final solo aparece cuando las tres partes están evaluadas; el estudiante la ve en su pantalla en ese momento.</div>' +
+        '<div class="grid grid-cols-3 gap-2 mt-3 text-center text-xs"><div class="rounded-xl bg-white shadow p-2"><div class="text-lg font-extrabold">' + filas.length + '</div>Estudiantes</div><div class="rounded-xl bg-white shadow p-2"><div class="text-lg font-extrabold">' + comp.length + '</div>Con nota final</div><div class="rounded-xl bg-white shadow p-2"><div class="text-lg font-extrabold">' + (comp.length ? fmt1(prom) : '—') + '</div>Promedio</div></div>' +
+        '<div class="flex flex-wrap gap-2 mt-3"><select data-gfiltro="ncurso" class="border rounded-xl px-3 py-2 text-sm"><option value="">Todos los cursos</option>' + cursos.map(c => '<option' + (F.curso === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select>' +
+        '<input data-gfiltro="nq" value="' + esc(F.q) + '" placeholder="Buscar por nombre" class="border rounded-xl px-3 py-2 text-sm flex-1 min-w-[140px]"><button data-accion="g-csv" class="px-3 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold">⬇️ Descargar CSV</button></div>' +
+        '<div class="bg-white/95 rounded-2xl shadow mt-3 overflow-x-auto"><table class="w-full text-xs border-collapse" style="min-width:560px"><thead><tr class="bg-slate-800 text-white"><th class="p-2 text-left">Estudiante</th><th class="p-2">Preguntas</th><th class="p-2">Terreno</th><th class="p-2">Fichas</th><th class="p-2">Nota final</th></tr></thead><tbody>' +
+        (filas.map(x => '<tr class="border-t cursor-pointer hover:bg-slate-50" data-accion="g-eval-pares" data-r="' + esc(x.k) + '"><td class="p-2"><b>' + esc(x.e.nombre) + '</b><div class="text-slate-400">' + esc(x.e.curso) + ' · ' + esc(miAsig(x.e) ? nomEq(miAsig(x.e)).split(' · ')[0] : 'sin equipo') + '</div></td>' +
+          '<td class="p-2 text-center">' + celda(x.n.A) + '</td><td class="p-2 text-center">' + celda(x.n.T) + '</td><td class="p-2 text-center">' + celda(x.n.P) + '</td>' +
+          '<td class="p-2 text-center font-extrabold text-base">' + (x.n.completo ? fmt1(x.n.nota) : '<span class="text-xs font-normal text-slate-400">pendiente</span>') + '</td></tr>').join('') || '<tr><td colspan="5" class="p-6 text-center text-slate-500">No hay estudiantes.</td></tr>') + '</tbody></table></div>';
+    }
+    function descargarCSV() {
+      const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const fila = ['Estudiante', 'RUT', 'Curso', 'Equipo', 'Preguntas (pts)', 'Preguntas máx.', 'Terreno (pts)', 'Terreno máx.', 'Fichas (pts)', 'Fichas máx.', 'Logro total %', 'Nota final'];
+      const lin = [fila.map(q).join(';')];
+      filasNotas().forEach(x => {
+        const n = x.n;
+        lin.push([x.e.nombre, x.e.rut, x.e.curso, miAsig(x.e) ? nomEq(miAsig(x.e)) : '', fmt1(n.A.pts), n.A.max, fmt1(n.T.pts), n.T.max, fmt1(n.P.pts), n.P.max, Math.round(n.frac * 100), n.completo ? fmt1(n.nota) : 'pendiente'].map(q).join(';'));
+      });
+      const blob = new Blob(['﻿' + lin.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'notas-salida-terreno.csv';
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     }
 
     /* ----- Contenido editable ----- */
@@ -725,7 +944,25 @@
           cargando(true, 'Restaurando…');
           try { await api('restaurarGuia', { seccion: b.dataset.s }); delete GD.cont[b.dataset.s]; } finally { cargando(false); }
           pintar(); aviso('Texto original restaurado.');
-        } else if (a === 'g-eval-pares') await abrirEvalPares(b.dataset.r);
+        } else if (a === 'g-eval-pares' || a === 'g-nav-p') await abrirEvalPares(b.dataset.r);
+        else if (a === 'g-filtro-p') { (GD.fP = GD.fP || {}).f = b.dataset.f; pintar(); }
+        else if (a === 'g-csv') descargarCSV();
+        else if (a === 'g-refrescar') {
+          cargando(true, 'Actualizando…');
+          try { const eq = GD.eq, fp = GD.fP, fe = GD.fEq, fn = GD.fN; await cargarGD(); GD.eq = eq; GD.fP = fp; GD.fEq = fe; GD.fN = fn; } finally { cargando(false); }
+          pintar(); aviso('Información actualizada.');
+        } else if (a === 'g-nivel') {
+          const id = b.dataset.id, n = Number(b.dataset.n);
+          b.parentElement.querySelectorAll('.gcel').forEach(c => c.classList.toggle('sel', c === b));
+          if (b.dataset.attr === 'gt') {
+            const eq = GD.eq || equipos()[0].id;
+            GD.dT[eq].niv[id] = n; totalesT();
+            clearTimeout(tmr.t); estadoGuardado('g-gt-st', 'Guardando…'); tmr.t = setTimeout(() => guardarT(eq), 600);
+          } else {
+            const k = b.dataset.r; GD.dP[k].niv[id] = n; totalesP(k);
+            clearTimeout(tmr['p' + k]); estadoGuardado('g-gp-st', 'Guardando…'); tmr['p' + k] = setTimeout(() => guardarP(k), 600);
+          }
+        }
       } catch (err) { cargando(false); aviso(err.message, 'error'); }
     });
     document.addEventListener('change', async e => {
@@ -738,6 +975,7 @@
           try { await asignar({ [k]: v }); pintar(); }
           catch (er) { if (antes) GD.asig[k] = antes; else delete GD.asig[k]; pintar(); throw er; }
         } else if (t.dataset.gfiltro === 'curso') { (GD.fEq = GD.fEq || {}).curso = t.value; pintar(); }
+        else if (t.dataset.gfiltro === 'ncurso') { (GD.fN = GD.fN || {}).curso = t.value; pintar(); }
         else if (t.dataset.gt) {
           const eq = GD.eq || equipos()[0].id;
           GD.dT[eq].niv[t.dataset.gt] = Number(t.value); totalesT();
@@ -748,12 +986,16 @@
         }
       } catch (err) { aviso(err.message, 'error'); }
     });
+    document.addEventListener('keydown', e => {
+      const t = e.target;
+      if ((e.key === 'Enter' || e.key === ' ') && t && t.classList && t.classList.contains('gcel') && t.dataset.accion) { e.preventDefault(); t.click(); }
+    });
     document.addEventListener('input', e => {
       const t = e.target;
       if (!t || !t.dataset || !GD) return;
-      if (t.dataset.gfiltro === 'q' || t.dataset.gfiltro === 'qp') {
+      if (t.dataset.gfiltro === 'q' || t.dataset.gfiltro === 'qp' || t.dataset.gfiltro === 'nq') {
         const pos = t.selectionStart, nom = t.dataset.gfiltro;
-        if (nom === 'q') (GD.fEq = GD.fEq || {}).q = t.value; else (GD.fP = GD.fP || {}).q = t.value;
+        if (nom === 'q') (GD.fEq = GD.fEq || {}).q = t.value; else if (nom === 'nq') (GD.fN = GD.fN || {}).q = t.value; else (GD.fP = GD.fP || {}).q = t.value;
         pintar();
         const n = document.querySelector('[data-gfiltro="' + nom + '"]');
         if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
