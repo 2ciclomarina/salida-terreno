@@ -653,6 +653,7 @@
       const d = GD.dT[eq];
       let h = '<div class="flex gap-2 overflow-x-auto pb-1">' + equipos().map(e => { const c = colDe(e.color), on = e.id === eq; return '<button data-accion="g-eq" data-e="' + e.id + '" class="shrink-0 px-3 py-2 rounded-xl text-sm font-bold" style="background:' + (on ? c[1] : c[0]) + ';color:' + (on ? '#fff' : '#1e293b') + ';border:2px solid ' + c[1] + '">' + esc(e.nombre.split(' · ')[0]) + '</button>'; }).join('') + '</div>' +
         '<div class="rounded-2xl bg-white/95 shadow p-3 mt-2 text-sm"><b>' + esc(nomEq(eq)) + '</b> · Evalúa: <b>' + esc(GD.yo.nombre) + '</b><br><span class="text-xs text-slate-500">Pinche la celda del nivel logrado en cada indicador: queda marcada con borde azul. El puntaje se guarda solo y puede cambiarlo cuando quiera.</span></div>' +
+        '<div class="flex flex-wrap items-center gap-2 mt-2"><button data-accion="g-iat" data-e="' + eq + '" class="px-3 py-2 rounded-xl bg-violet-600 text-white text-sm font-bold">🤖 Sugerir evaluación con IA</button><span class="text-xs text-slate-500">La IA revisa lo que el equipo envió en la aplicación y solo propone: usted decide.</span></div><div id="g-iat-box" class="mt-2"></div>' +
         '<div class="mt-2">' + tablaRub(rub, { edit: true, attr: 'gt', sel: id => d.niv[id] }) + '</div>';
       h += '<div class="bg-white/95 rounded-2xl shadow p-3 mt-3 space-y-2"><textarea data-gtobs rows="3" placeholder="Retroalimentación breve (solo sobre el trabajo evaluado)" class="w-full border rounded-xl px-3 py-2 text-sm">' + esc(d.obs) + '</textarea>' +
         '<div id="g-tot" class="text-sm"></div><div id="g-ev-otros" class="text-xs text-slate-600"></div><span id="g-gt-st" class="text-xs"></span></div>';
@@ -779,6 +780,37 @@
       if (r.obs) { d.obs = r.obs; const t = document.querySelector('[data-gpobs]'); if (t) t.value = r.obs; }
       totalesP(k); guardarP(k);
       const bx = $('#g-ia-box'); if (bx) bx.innerHTML = '<div class="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs p-2">✅ Se aplicó la sugerencia de la IA. Revise las celdas y cambie lo que estime necesario: cada cambio se guarda solo.</div>';
+    }
+    async function sugerirIAT(eq) {
+      const rub = cont('rubT'), E = equipos().find(x => x.id === eq) || {};
+      cargando(true, 'La IA está revisando el trabajo del equipo…');
+      let r;
+      try {
+        r = await api('sugerirEvalTerreno', {
+          equipo: eq, rub: rub.map(x => ({ id: x.id, nom: x.nom, L: x.L, M: x.M, N: x.N, v: x.v })),
+          equipoInfo: { nombre: E.nombre, tema: E.tema, objetivo: E.objetivo, hipotesis: E.hipotesis, conceptos: E.conceptos }
+        });
+      } finally { cargando(false); }
+      GD_IA['T' + eq] = r;
+      const bx = $('#g-iat-box'); if (!bx) return;
+      const et = { 2: 'Logrado · 2', 1: 'Medianamente logrado · 1', 0: 'No observado · 0' }, col = { 2: 'bg-emerald-100 text-emerald-800', 1: 'bg-amber-100 text-amber-800', 0: 'bg-rose-100 text-rose-800' };
+      bx.innerHTML = '<div class="rounded-xl border-2 border-violet-300 bg-violet-50 p-2 space-y-2 text-sm"><div class="font-bold">🤖 Sugerencia de la IA (' + Object.keys(r.niv).length + ' de ' + rub.length + ' indicadores)</div>' +
+        rub.map(x => '<div class="flex gap-2 items-start"><span class="shrink-0 text-xs font-semibold rounded-full px-2 py-0.5 ' + (r.niv[x.id] !== undefined ? col[r.niv[x.id]] : 'bg-slate-100 text-slate-600') + '">' + esc(x.id) + ' · ' + (r.niv[x.id] !== undefined ? et[r.niv[x.id]] : 'evalúe usted') + '</span><span class="text-xs text-slate-700">' + esc(r.razones[x.id] || '') + '</span></div>').join('') +
+        (r.obs ? '<div class="text-xs rounded-lg bg-white p-2"><b>Comentario propuesto:</b> ' + esc(r.obs) + '</div>' : '') +
+        '<div class="text-[11px] text-slate-600">Los indicadores «evalúe usted» dependen de lo que solo el docente observó en el terreno (tiempos, quién habló, etc.) o no tienen evidencia en la aplicación.</div>' +
+        '<div class="flex flex-wrap gap-2"><button data-accion="g-iat-usar" data-e="' + eq + '" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">✅ Usar esta sugerencia</button><button data-accion="g-iat-cerrar" class="px-3 py-2 rounded-xl bg-white border text-sm font-semibold">Descartar</button></div>' +
+        '<div class="text-[11px] text-slate-500">Al usarla se marcan solo los indicadores propuestos y se guarda; después puede cambiar cualquier celda.</div></div>';
+    }
+    function usarIAT(eq) {
+      const r = GD_IA['T' + eq], d = GD.dT[eq];
+      if (!r || !d) return;
+      Object.keys(r.niv).forEach(id => {
+        d.niv[id] = r.niv[id];
+        document.querySelectorAll('#g-cuerpo td.gcel[data-attr="gt"][data-id="' + id + '"]').forEach(c => c.classList.toggle('sel', Number(c.dataset.n) === r.niv[id]));
+      });
+      if (r.obs && !d.obs) { d.obs = r.obs; const t = document.querySelector('[data-gtobs]'); if (t) t.value = r.obs; }
+      totalesT(); guardarT(eq);
+      const bx = $('#g-iat-box'); if (bx) bx.innerHTML = '<div class="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs p-2">✅ Se aplicó la sugerencia de la IA. Complete los indicadores que faltan y cambie lo que estime necesario: cada cambio se guarda solo.</div>';
     }
     function totalesP(k) {
       const rub = cont('rubP'), max = rub.length * 2, d = GD.dP[k], e = $('#g-ptot');
@@ -997,7 +1029,10 @@
           cargando(true, 'Actualizando…');
           try { const eq = GD.eq, fp = GD.fP, fe = GD.fEq, fn = GD.fN; await cargarGD(); GD.eq = eq; GD.fP = fp; GD.fEq = fe; GD.fN = fn; } finally { cargando(false); }
           pintar(); aviso('Información actualizada.');
-        } else if (a === 'g-ia') await sugerirIA(b.dataset.r);
+        } else if (a === 'g-iat') await sugerirIAT(b.dataset.e);
+        else if (a === 'g-iat-usar') usarIAT(b.dataset.e);
+        else if (a === 'g-iat-cerrar') { const bx = $('#g-iat-box'); if (bx) bx.innerHTML = ''; }
+        else if (a === 'g-ia') await sugerirIA(b.dataset.r);
         else if (a === 'g-ia-usar') usarIA(b.dataset.r);
         else if (a === 'g-ia-cerrar') { const bx = $('#g-ia-box'); if (bx) bx.innerHTML = ''; }
         else if (a === 'g-nivel') {
