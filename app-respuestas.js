@@ -30,6 +30,32 @@
     TABS_DOC.splice(i < 0 ? 0 : i + 1, 0, ['respuestas', '📥 Respuestas']);
   }
 
+  /* ---------- Sin responder ---------- */
+  const activos = () => ests().filter(e => String(e.activo).toLowerCase() !== 'no');
+  function sinResp() {
+    const hechas = {}; resps().forEach(r => { hechas[rutK(r.rut) + '|' + r.actividad_id] = 1; });
+    const q = F.q.trim().toLowerCase(), out = [];
+    acts().forEach(a => {
+      if (F.act && a.id !== F.act) return;
+      activos().forEach(e => {
+        if (hechas[rutK(e.rut) + '|' + a.id]) return;
+        if ((F.curso && e.curso !== F.curso) || (q && String(e.nombre).toLowerCase().indexOf(q) < 0)) return;
+        out.push({ a: a, e: e });
+      });
+    });
+    return out.sort((p, s2) => String(p.e.curso).localeCompare(String(s2.e.curso), 'es') || String(p.e.nombre).localeCompare(String(s2.e.nombre), 'es') || String(p.a.titulo).localeCompare(String(s2.a.titulo), 'es'));
+  }
+  const totalSin = () => { const h = {}; resps().forEach(r => { h[rutK(r.rut) + '|' + r.actividad_id] = 1; }); let n = 0; acts().forEach(a => activos().forEach(e => { if (!h[rutK(e.rut) + '|' + a.id]) n++; })); return n; };
+  function abrirSin(rut, actId) {
+    const a = actDe(actId), e = estDe(rut); if (!a) return;
+    modal('<div class="space-y-3 pt-2"><div><div class="font-extrabold text-lg">' + esc(e.nombre) + '</div><div class="text-xs text-slate-500">' + esc(e.curso) + ' · ' + esc(a.titulo || '') + '</div></div>' +
+      '<div class="rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-sm p-3">🚫 Este estudiante <b>no ha respondido</b> esta actividad.</div>' +
+      '<p class="text-xs text-slate-600">Si lo desea, puede evaluarlo igual (por ejemplo, con nota mínima).</p>' +
+      '<label class="text-sm font-bold flex items-center gap-2">Puntaje (0 a ' + fmt(a.puntaje_max) + '): <input id="rcs-p" inputmode="decimal" value="0" class="border rounded-lg px-2 py-1 w-20"></label>' +
+      '<textarea id="rcs-r" rows="2" placeholder="Comentario breve (opcional)" class="w-full border rounded-xl px-3 py-2 text-sm"></textarea>' +
+      '<button data-accion="rc-sin-guardar" data-rut="' + esc(rut) + '" data-id="' + esc(actId) + '" class="px-4 py-2 rounded-xl bg-teal-700 text-white font-bold text-sm">💾 Evaluar sin respuesta</button></div>');
+  }
+
   /* ---------- Lista ---------- */
   function filas() {
     const q = F.q.trim().toLowerCase();
@@ -46,20 +72,27 @@
     const all = resps().filter(r => actDe(r.actividad_id));
     const pend = all.filter(r => r.estado !== 'evaluada').length;
     const cursos = Array.from(new Set(ests().map(e => e.curso).filter(Boolean))).sort();
-    const fl = filas(); listaNav = fl.map(x => x.r.id);
+    const sinMode = F.est === 'sin';
+    const fl = sinMode ? [] : filas(); listaNav = fl.map(x => x.r.id);
+    const sn = sinMode ? sinResp() : [], nSin = totalSin();
     const op = (v, t, s) => '<option value="' + esc(v) + '"' + (s === v ? ' selected' : '') + '>' + esc(t) + '</option>';
     const y = window.scrollY;
     box.innerHTML = '<div class="bg-white/95 rounded-2xl shadow p-4 space-y-3">' +
       '<div class="flex items-center gap-2"><h3 class="font-extrabold text-lg flex-1">📥 Respuestas de los estudiantes</h3>' +
       '<button data-accion="rc-refrescar" class="px-3 py-2 rounded-xl bg-slate-100 text-sm font-semibold">🔄 Actualizar</button></div>' +
       '<div class="flex gap-2 text-center text-sm"><div class="flex-1 rounded-xl bg-amber-50 border border-amber-200 p-2"><div class="text-2xl font-extrabold text-amber-700">' + pend + '</div>por corregir</div>' +
-      '<div class="flex-1 rounded-xl bg-emerald-50 border border-emerald-200 p-2"><div class="text-2xl font-extrabold text-emerald-700">' + (all.length - pend) + '</div>corregidas</div></div>' +
+      '<div class="flex-1 rounded-xl bg-emerald-50 border border-emerald-200 p-2"><div class="text-2xl font-extrabold text-emerald-700">' + (all.length - pend) + '</div>corregidas</div>' +
+      '<button data-accion="rc-ver-sin" class="flex-1 rounded-xl bg-rose-50 border border-rose-200 p-2"><div class="text-2xl font-extrabold text-rose-700">' + nSin + '</div>sin responder 👁</button></div>' +
       '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">' +
-      '<select data-rcf="est" class="border rounded-xl px-2 py-2">' + op('pend', 'Por corregir', F.est) + op('ev', 'Corregidas', F.est) + op('todas', 'Todas', F.est) + '</select>' +
+      '<select data-rcf="est" class="border rounded-xl px-2 py-2">' + op('pend', 'Por corregir', F.est) + op('ev', 'Corregidas', F.est) + op('todas', 'Todas', F.est) + op('sin', 'Sin responder', F.est) + '</select>' +
       '<select data-rcf="act" class="border rounded-xl px-2 py-2">' + op('', 'Todas las actividades', F.act) + acts().map(a => op(a.id, a.titulo || a.id, F.act)).join('') + '</select>' +
       '<select data-rcf="curso" class="border rounded-xl px-2 py-2">' + op('', 'Todos los cursos', F.curso) + cursos.map(c => op(c, c, F.curso)).join('') + '</select>' +
       '<input data-rcf="q" value="' + esc(F.q) + '" placeholder="Buscar estudiante" class="border rounded-xl px-3 py-2"></div>' +
-      '<div class="grid gap-2">' + (fl.length ? fl.map(x => {
+      '<div class="grid gap-2">' + (sinMode ? (sn.length ? sn.map(x =>
+        '<button data-accion="rc-sin" data-rut="' + esc(x.e.rut) + '" data-id="' + esc(x.a.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border bg-rose-50 border-rose-200">' +
+        '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div>' +
+        '<div class="text-[11px] text-slate-500 truncate">' + esc(x.a.titulo || '') + '</div></div>' + chip('🚫 Sin responder', 'bg-rose-200 text-rose-900') + '</button>').join('')
+        : '<div class="text-sm text-slate-500 text-center p-6">Todos respondieron con estos filtros. 🎉</div>') : fl.length ? fl.map(x => {
         const ev = x.r.estado === 'evaluada';
         return '<button data-accion="rc-abrir" data-id="' + esc(x.r.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border ' + (ev ? 'bg-white' : 'bg-amber-50 border-amber-300') + '">' +
           '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div>' +
@@ -235,6 +268,16 @@
     try {
       if (a === 'rc-abrir') abrir(b.dataset.id);
       else if (a === 'rc-refrescar') await traer(false);
+      else if (a === 'rc-ver-sin') { F.est = 'sin'; vista(); }
+      else if (a === 'rc-sin') abrirSin(b.dataset.rut, b.dataset.id);
+      else if (a === 'rc-sin-guardar') {
+        const p = Number(String(document.getElementById('rcs-p').value).replace(',', '.'));
+        if (!isFinite(p) || p < 0) throw new Error('Escriba un puntaje válido.');
+        const retro = document.getElementById('rcs-r').value.trim();
+        cargando(true, 'Guardando…');
+        try { await api('evaluarSinRespuesta', { rut: b.dataset.rut, actividad_id: b.dataset.id, puntaje_final: p, retro: retro }); } finally { cargando(false); }
+        cerrarModal(); aviso('Evaluación guardada.'); await traer(true);
+      }
       else if (a === 'rc-niv') {
         const it = b.dataset.it, i = Number(b.dataset.i), n = b.dataset.n;
         const x = cur.dato.it.find(y => y.id === it), arr = (cur.niv[it] || []).slice();
