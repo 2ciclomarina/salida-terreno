@@ -209,7 +209,7 @@
 
     /* ----- Nota y avance ----- */
     function calcular() {
-      const acts = (S.datos && S.datos.actividades) || [];
+      const acts = ((S.datos && S.datos.actividades) || []).filter(a => !a.formativa);
       let pa = 0, ma = 0, hechas = 0, evald = 0;
       acts.forEach(a => {
         const m = Number(a.puntaje_max) || 0; ma += m;
@@ -231,7 +231,7 @@
       return r;
     }
     function htmlAvance(c) {
-      const acts = (S.datos && S.datos.actividades) || [];
+      const acts = ((S.datos && S.datos.actividades) || []).filter(a => !a.formativa);
       const grupos = [];
       grupos.push(acts.map(a => { let r = null; try { r = respuestaDe(a); } catch (_) {} return !!r; }));
       if (G.cargada) {
@@ -543,7 +543,7 @@
     const nomEq = id => { const e = equipos().find(x => x.id === id); return e ? e.nombre : 'Sin equipo'; };
     const activos = () => (S.panel.estudiantes || []).filter(e => String(e.activo).toLowerCase() !== 'no');
     const miAsig = e => GD.asig[rutK(e.rut)] || '';
-    if (typeof ACC_ESCRITURA !== 'undefined') ['guardarGuia', 'restaurarGuia', 'asignarEquipos', 'estadoFicha'].forEach(a => ACC_ESCRITURA.add(a));
+    if (typeof ACC_ESCRITURA !== 'undefined') ['guardarGuia', 'restaurarGuia', 'asignarEquipos', 'estadoFicha', 'marcarFormativa'].forEach(a => ACC_ESCRITURA.add(a));
 
     if (!TABS_DOC.some(t => t[0] === 'guias')) {
       const i = TABS_DOC.findIndex(t => t[0] === 'recorridos');
@@ -584,14 +584,14 @@
     function pintar() {
       if (S.tabDoc !== 'guias' || !GD) return;
       const y = window.scrollY;
-      const subs = [['fichas', '▶️ Habilitar fichas'], ['equipos', '👥 Equipos'], ['rubt', '📊 Rúbrica de terreno'], ['rubp', '📋 Evaluar fichas'], ['notas', '🏁 Notas'], ['contenido', '✏️ Contenido']];
+      const subs = [['fichas', '▶️ Habilitar fichas'], ['equipos', '👥 Equipos'], ['rubt', '📊 Rúbrica de terreno'], ['rubp', '📋 Evaluar fichas'], ['formativas', '🧪 Formativas'], ['notas', '🏁 Notas'], ['contenido', '✏️ Contenido']];
       const titular = typeof esTitular === 'function' ? esTitular() : true;
       const banner = titular ? '' : '<div class="rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-sm p-3 mb-3">🤝 Ingresó como ayudante: <b>' + esc(GD.yo.nombre) + '</b>.</div>';
       $('#doc-contenido').innerHTML = banner +
         '<div class="flex gap-1 overflow-x-auto bg-white/95 rounded-2xl shadow p-1 text-sm font-semibold mb-3">' + subs.map(([k, t]) =>
           '<button data-accion="g-sub" data-s="' + k + '" class="px-3 py-2 rounded-xl whitespace-nowrap ' + (gsub() === k ? 'tab-activa' : '') + '">' + t + '</button>').join('') +
         '<button data-accion="g-refrescar" class="ml-auto px-3 py-2 rounded-xl whitespace-nowrap bg-slate-100" title="Traer lo último guardado por estudiantes y otros docentes">🔄 Actualizar</button></div>' +
-        '<div id="g-cuerpo">' + ({ fichas: pFichas, equipos: pEquipos, rubt: pRubT, rubp: pRubP, notas: pNotas, contenido: pContenido }[gsub()] || pFichas)() + '</div>';
+        '<div id="g-cuerpo">' + ({ fichas: pFichas, equipos: pEquipos, rubt: pRubT, rubp: pRubP, formativas: pFormativas, notas: pNotas, contenido: pContenido }[gsub()] || pFichas)() + '</div>';
       window.scrollTo(0, y);
     }
 
@@ -840,7 +840,7 @@
       return m;
     }
     function notaDoc(e, mapa) {
-      const k = rutK(e.rut), acts = S.panel.actividades || [], rs = mapa[k] || {};
+      const k = rutK(e.rut), acts = (S.panel.actividades || []).filter(a => !a.formativa), rs = mapa[k] || {};
       let pa = 0, ma = 0, ev = 0;
       acts.forEach(a => {
         const m = Number(a.puntaje_max) || 0; ma += m;
@@ -861,6 +861,21 @@
       const mapa = mapaResp(), F = GD.fN = GD.fN || { curso: '', q: '' }, q = (F.q || '').toLowerCase();
       return activos().filter(e => (!F.curso || e.curso === F.curso) && (!q || String(e.nombre).toLowerCase().indexOf(q) >= 0))
         .map(e => ({ e: e, k: rutK(e.rut), n: notaDoc(e, mapa) })).sort((a, b) => String(a.e.curso).localeCompare(String(b.e.curso), 'es') || String(a.e.nombre).localeCompare(String(b.e.nombre), 'es'));
+    }
+    function pFormativas() {
+      const acts = S.panel.actividades || [], pts = S.panel.puntos || [];
+      const nomP = id => { const p = pts.find(x => x.id === id); return p ? p.nombre : ''; };
+      const fila = a => {
+        const f = !!a.formativa, h = a.punto_id ? nomP(a.punto_id) || 'Con hito' : 'Sin hito';
+        return '<div class="flex items-center gap-2 p-3 rounded-xl border ' + (f ? 'bg-violet-50 border-violet-300' : 'bg-white border-slate-200') + '">' +
+          '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(a.titulo || 'Sin título') + '</div>' +
+          '<div class="text-[11px] text-slate-500">' + esc(a.tipo || '') + ' · ' + esc(h) + '</div></div>' +
+          '<span class="text-[11px] font-bold px-2 py-1 rounded-lg ' + (f ? 'bg-violet-200 text-violet-900' : 'bg-emerald-100 text-emerald-800') + '">' + (f ? '🧪 Formativa' : 'Cuenta para la nota') + '</span>' +
+          '<button data-accion="g-form" data-id="' + esc(a.id) + '" data-v="' + (f ? '0' : '1') + '" class="px-3 py-2 rounded-xl text-xs font-bold ' + (f ? 'bg-slate-200 text-slate-800' : 'bg-violet-700 text-white') + '">' + (f ? 'Hacer evaluada' : 'Hacer formativa') + '</button></div>';
+      };
+      return '<div class="bg-white/95 rounded-2xl shadow p-4"><h3 class="font-extrabold text-lg">🧪 Actividades formativas</h3>' +
+        '<p class="text-sm text-slate-600 mb-3">Sirven para practicar: <b>no cuentan</b> en el avance, la nota ni los informes, y <b>no se asocian a hitos</b>. Si la vuelve a hacer evaluada, se recupera su hito anterior.</p>' +
+        '<div class="grid gap-2">' + (acts.length ? acts.map(fila).join('') : '<div class="text-sm text-slate-500">Aún no hay actividades.</div>') + '</div></div>';
     }
     function pNotas() {
       const F = GD.fN = GD.fN || { curso: '', q: '' };
@@ -996,6 +1011,14 @@
       const a = b.dataset.accion;
       try {
         if (a === 'g-sub') { S.gsub = b.dataset.s; pintar(); }
+        else if (a === 'g-form') {
+          const act = (S.panel.actividades || []).find(x => x.id === b.dataset.id);
+          if (!act) return;
+          const v = b.dataset.v === '1';
+          cargando(true, 'Guardando…');
+          try { const r = await api('marcarFormativa', { id: act.id, valor: v }); act.formativa = v; act.punto_id = (r && r.punto_id) || ''; } finally { cargando(false); }
+          pintar(); aviso(v ? 'Actividad formativa: no cuenta para la nota.' : 'La actividad vuelve a contar para la nota.');
+        }
         else if (a === 'g-eq') { GD.eq = b.dataset.e; pintar(); }
         else if (a === 'g-estado') {
           const r = await api('estadoFicha', { ficha: b.dataset.f, estado: b.dataset.e });
@@ -1070,6 +1093,54 @@
         }
       } catch (err) { aviso(err.message, 'error'); }
     });
+    /* ----- Actividades formativas: fuera de informes y notas ----- */
+    if (typeof calcularEstudiantes === 'function') {
+      const _calcEst = calcularEstudiantes;
+      calcularEstudiantes = function () {
+        const P = S.panel;
+        if (!P || !Array.isArray(P.actividades) || !P.actividades.some(a => a.formativa)) return _calcEst.apply(this, arguments);
+        const a0 = P.actividades, r0 = P.respuestas;
+        const ids = {}; a0.forEach(a => { if (a.formativa) ids[a.id] = 1; });
+        P.actividades = a0.filter(a => !a.formativa);
+        P.respuestas = (r0 || []).filter(r => !ids[r.actividad_id]);
+        try { return _calcEst.apply(this, arguments); } finally { P.actividades = a0; P.respuestas = r0; }
+      };
+    }
+
+    /* ----- Casilla "formativa" en el formulario de actividades ----- */
+    let apiOk = false;
+    try {
+      const _api = api;
+      api = function (acc, datos) {
+        if (acc === 'guardarActividad' && datos && datos.actividad) {
+          const c = document.getElementById('g-form-chk');
+          if (c) { datos.actividad.formativa = c.checked; if (c.checked) { datos.actividad.punto_id = ''; datos.actividad.requiere_gps = 'no'; } }
+        }
+        return _api.apply(this, arguments);
+      };
+      apiOk = true;
+    } catch (_) { apiOk = false; }
+    function inyectarForm() {
+      if (!apiOk) return;
+      document.querySelectorAll('form').forEach(fm => {
+        if (!fm.elements || !fm.elements.titulo || !fm.elements.punto_id || fm.querySelector('#g-form-chk')) return;
+        const id = fm.elements.id && fm.elements.id.value;
+        const tit = fm.elements.titulo.value;
+        const act = (S.panel && S.panel.actividades || []).find(a => (id && a.id === id) || (!id && tit && a.titulo === tit));
+        const sel = fm.elements.punto_id, cont = sel.closest('label') || sel.parentElement;
+        const w = document.createElement('label');
+        w.className = 'flex items-start gap-2 p-3 rounded-xl bg-violet-50 border border-violet-300 text-sm mb-2';
+        w.innerHTML = '<input type="checkbox" id="g-form-chk" class="mt-1"><span><b>🧪 Actividad formativa</b><br><span class="text-xs text-slate-600">Sirve para practicar. No cuenta para la nota ni el avance y no se asocia a un hito.</span></span>';
+        cont.parentNode.insertBefore(w, cont);
+        const chk = w.querySelector('input');
+        const aplicar = () => { cont.style.opacity = chk.checked ? '.4' : ''; sel.disabled = chk.checked; if (chk.checked) sel.value = ''; };
+        chk.checked = !!(act && act.formativa);
+        chk.addEventListener('change', aplicar);
+        aplicar();
+      });
+    }
+    try { new MutationObserver(() => inyectarForm()).observe(document.body, { childList: true, subtree: true }); } catch (_) {}
+
     document.addEventListener('keydown', e => {
       const t = e.target;
       if ((e.key === 'Enter' || e.key === ' ') && t && t.classList && t.classList.contains('gcel') && t.dataset.accion) { e.preventDefault(); t.click(); }
