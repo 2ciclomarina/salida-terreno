@@ -11,7 +11,7 @@
 
   const rutK = r => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
   const js = (t, d) => { try { return t && typeof t === 'string' ? JSON.parse(t) : (t || d); } catch (_) { return d; } };
-  const F = { est: 'pend', act: '', curso: '', q: '' };
+  const F = { est: 'todas', open: {}, act: '', curso: '', q: '' };
   const FACT = { L: 1, M: 0.5, N: 0 };
   const fotoCache = {};
   let listaNav = [], cargadoVez = false, cur = null;
@@ -66,6 +66,33 @@
         String(p.e.curso).localeCompare(String(s.e.curso), 'es') || String(p.e.nombre).localeCompare(String(s.e.nombre), 'es') ||
         String(p.r.timestamp_servidor).localeCompare(String(s.r.timestamp_servidor)));
   }
+  // Cada actividad en su propio bloque, para corregir sin confundirse
+  function grupos(sinMode, fl, sn) {
+    const todas = acts();
+    const lista = todas.filter(a => !F.act || a.id === F.act);
+    if (!lista.length) return '<div class="text-sm text-slate-500 text-center p-6">Aún no hay actividades.</div>';
+    return lista.map((a, n) => {
+      const rs = resps().filter(r => r.actividad_id === a.id);
+      const pend = rs.filter(r => r.estado !== 'evaluada').length, ev = rs.length - pend;
+      const sinN = activos().filter(e => !rs.some(r => rutK(r.rut) === rutK(e.rut))).length;
+      const filasA = sinMode ? sn.filter(x => x.a.id === a.id) : fl.filter(x => x.a.id === a.id);
+      const abierto = F.open[a.id] !== undefined ? F.open[a.id] : (sinMode ? filasA.length > 0 : (pend > 0 || !!F.act));
+      const cuerpo = filasA.length ? filasA.map(x => {
+        if (sinMode) return '<button data-accion="rc-sin" data-rut="' + esc(x.e.rut) + '" data-id="' + esc(a.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border bg-rose-50 border-rose-200">' +
+          '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div></div>' + chip('🚫 Sin responder', 'bg-rose-200 text-rose-900') + '</button>';
+        const ok = x.r.estado === 'evaluada';
+        return '<button data-accion="rc-abrir" data-id="' + esc(x.r.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border ' + (ok ? 'bg-white' : 'bg-amber-50 border-amber-300') + '">' +
+          '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div></div>' +
+          (ok ? chip('✅ ' + fmt(x.r.puntaje_final) + '/' + fmt(a.puntaje_max), 'bg-emerald-100 text-emerald-800') : chip('⏳ Por corregir', 'bg-amber-200 text-amber-900')) + '</button>';
+      }).join('') : '<div class="text-sm text-slate-500 text-center p-3">' + (sinMode ? 'Todos respondieron. 🎉' : rs.length ? 'No hay respuestas con estos filtros.' : 'Aún no hay respuestas.') + '</div>';
+      return '<details data-rcact="' + esc(a.id) + '" class="rounded-2xl border-2 ' + (pend ? 'border-amber-300' : 'border-slate-200') + ' bg-white overflow-hidden"' + (abierto ? ' open' : '') + '>' +
+        '<summary class="cursor-pointer p-3 flex items-center gap-2 flex-wrap" style="background:#f8fafc">' +
+        '<span class="shrink-0 w-7 h-7 rounded-full bg-indigo-700 text-white text-xs font-extrabold flex items-center justify-center">' + (n + 1) + '</span>' +
+        '<span class="flex-1 min-w-0 font-extrabold text-sm">' + esc(a.titulo || 'Sin título') + (a.formativa ? ' 🧪' : '') + ' <span class="font-normal text-xs text-slate-500">· ' + esc(a.tipo || '') + ' · ' + fmt(a.puntaje_max) + ' pts</span></span>' +
+        chip('⏳ ' + pend, 'bg-amber-100 text-amber-900') + chip('✅ ' + ev, 'bg-emerald-100 text-emerald-800') + chip('🚫 ' + sinN, 'bg-rose-100 text-rose-800') + '</summary>' +
+        '<div class="p-2 grid gap-2">' + cuerpo + '</div></details>';
+    }).join('');
+  }
   function vista() {
     const box = document.getElementById('doc-contenido');
     if (!box || S.tabDoc !== 'respuestas') return;
@@ -73,7 +100,7 @@
     const pend = all.filter(r => r.estado !== 'evaluada').length;
     const cursos = Array.from(new Set(ests().map(e => e.curso).filter(Boolean))).sort();
     const sinMode = F.est === 'sin';
-    const fl = sinMode ? [] : filas(); listaNav = fl.map(x => x.r.id);
+    const fl = sinMode ? [] : filas();
     const sn = sinMode ? sinResp() : [], nSin = totalSin();
     const op = (v, t, s) => '<option value="' + esc(v) + '"' + (s === v ? ' selected' : '') + '>' + esc(t) + '</option>';
     const y = window.scrollY;
@@ -88,17 +115,7 @@
       '<select data-rcf="act" class="border rounded-xl px-2 py-2">' + op('', 'Todas las actividades', F.act) + acts().map(a => op(a.id, a.titulo || a.id, F.act)).join('') + '</select>' +
       '<select data-rcf="curso" class="border rounded-xl px-2 py-2">' + op('', 'Todos los cursos', F.curso) + cursos.map(c => op(c, c, F.curso)).join('') + '</select>' +
       '<input data-rcf="q" value="' + esc(F.q) + '" placeholder="Buscar estudiante" class="border rounded-xl px-3 py-2"></div>' +
-      '<div class="grid gap-2">' + (sinMode ? (sn.length ? sn.map(x =>
-        '<button data-accion="rc-sin" data-rut="' + esc(x.e.rut) + '" data-id="' + esc(x.a.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border bg-rose-50 border-rose-200">' +
-        '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div>' +
-        '<div class="text-[11px] text-slate-500 truncate">' + esc(x.a.titulo || '') + '</div></div>' + chip('🚫 Sin responder', 'bg-rose-200 text-rose-900') + '</button>').join('')
-        : '<div class="text-sm text-slate-500 text-center p-6">Todos respondieron con estos filtros. 🎉</div>') : fl.length ? fl.map(x => {
-        const ev = x.r.estado === 'evaluada';
-        return '<button data-accion="rc-abrir" data-id="' + esc(x.r.id) + '" class="text-left flex items-center gap-2 p-3 rounded-xl border ' + (ev ? 'bg-white' : 'bg-amber-50 border-amber-300') + '">' +
-          '<div class="flex-1 min-w-0"><div class="font-bold text-sm truncate">' + esc(x.e.nombre) + ' <span class="font-normal text-slate-500">· ' + esc(x.e.curso) + '</span></div>' +
-          '<div class="text-[11px] text-slate-500 truncate">' + esc(x.a.titulo || '') + '</div></div>' +
-          (ev ? chip('✅ ' + fmt(x.r.puntaje_final) + '/' + fmt(x.a.puntaje_max), 'bg-emerald-100 text-emerald-800') : chip('⏳ Por corregir', 'bg-amber-200 text-amber-900')) + '</button>';
-      }).join('') : '<div class="text-sm text-slate-500 text-center p-6">No hay respuestas con estos filtros.</div>') + '</div></div>';
+      '<div class="space-y-3">' + grupos(sinMode, fl, sn) + '</div></div>';
     window.scrollTo(0, y);
   }
 
@@ -181,6 +198,8 @@
     const e = estDe(r.rut), dato = items(a, r), ev0 = js(r.evaluacion, {});
     const niv = {}; dato.it.forEach(x => { if (Array.isArray(ev0[x.id])) niv[x.id] = ev0[x.id].slice(); });
     cur = { r: r, a: a, dato: dato, niv: niv, num: {}, ev0: ev0, ia: null };
+    listaNav = filas().filter(x => x.a.id === a.id).map(x => x.r.id);
+    if (listaNav.indexOf(id) < 0) listaNav.push(id);
     const i = listaNav.indexOf(id);
     const nav = '<div class="flex items-center gap-2 text-xs">' +
       (i > 0 ? '<button data-accion="rc-abrir" data-id="' + esc(listaNav[i - 1]) + '" class="px-3 py-2 rounded-xl bg-slate-100 font-semibold">◀ Anterior</button>' : '<span></span>') +
@@ -235,7 +254,7 @@
     try { res = await api('guardarEvaluacion', { respuesta_id: cur.r.id, puntaje_final: t, retro: retro, evaluacion: evObj }); } finally { cargando(false); }
     Object.assign(cur.r, { estado: 'evaluada', puntaje_final: res && res.puntaje_final !== undefined ? res.puntaje_final : t, retro_docente: retro, evaluacion: JSON.stringify(evObj), evaluador: (res && res.evaluador) || cur.r.evaluador });
     aviso('Corrección guardada.');
-    if (sig && prox) { const antes = listaNav.slice(); vista(); listaNav = antes; abrir(prox); }
+    if (sig && prox) { vista(); abrir(prox); }
     else { cerrarModal(); vista(); }
   }
   async function traer(silencioso) {
@@ -306,6 +325,10 @@
       const n = document.querySelector('[data-rcf="q"]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
     }
   });
+  document.addEventListener('toggle', e => {
+    const d = e.target;
+    if (d && d.dataset && d.dataset.rcact) F.open[d.dataset.rcact] = d.open;
+  }, true);
   document.addEventListener('change', e => {
     const t = e.target;
     if (t && t.dataset && t.dataset.rcf && t.dataset.rcf !== 'q') { F[t.dataset.rcf] = t.value; vista(); }
