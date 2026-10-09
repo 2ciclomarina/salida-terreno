@@ -99,21 +99,39 @@
     }
   }
 
+  function poner(ref, modo) {
+    const padre = modo === 'dentro' ? ref : ref.parentNode;
+    if (!padre || padre.querySelector(':scope > .clima24')) return;
+    const b = document.createElement('div');
+    b.className = 'clima24 bg-white rounded-2xl p-3 shadow text-sm' + (modo === 'dentro' ? ' mt-3' : '');
+    if (modo === 'dentro') ref.appendChild(b);
+    else if (modo === 'despues') ref.parentNode.insertBefore(b, ref.nextSibling);
+    else ref.parentNode.insertBefore(b, ref);
+    montar(b);
+  }
+  // La tarjeta «Donde usted está ahora» (pestaña del mapa) no tiene un identificador conocido: se busca por su título
+  function tarjetaAhora() {
+    const els = document.querySelectorAll('h1,h2,h3,h4,div,span,p,b');
+    for (let i = 0; i < els.length; i++) {
+      const e = els[i];
+      if (e.children.length === 0 && /^\s*Donde usted est(á|a) ahora\s*$/i.test(e.textContent)) {
+        let c = e.parentElement;
+        for (let k = 0; k < 4 && c && c.parentElement; k++) {
+          if (/rounded/.test(c.className || '') && /(bg-white|shadow)/.test(c.className || '')) return c;
+          c = c.parentElement;
+        }
+        return e.parentElement && e.parentElement.parentElement;
+      }
+    }
+    return null;
+  }
   function revisar() {
     const prev = document.getElementById('rec-prev-clima');
-    if (prev && !document.getElementById('clima24')) {
-      const b = document.createElement('div');
-      b.id = 'clima24'; b.className = 'bg-white rounded-2xl p-3 shadow text-sm';
-      prev.parentNode.insertBefore(b, prev.nextSibling);
-      montar(b);
-    }
+    if (prev) poner(prev, 'despues');
     const mapa = document.getElementById('rec-mapa');
-    if (mapa && !document.getElementById('clima24')) {
-      const b = document.createElement('div');
-      b.id = 'clima24'; b.className = 'bg-white rounded-2xl p-3 shadow text-sm';
-      mapa.parentNode.insertBefore(b, mapa);
-      montar(b);
-    }
+    if (mapa) poner(mapa, 'antes');
+    const ahora = tarjetaAhora();
+    if (ahora && !ahora.closest('.clima24')) poner(ahora, 'dentro');
   }
   let t = null;
   try { new MutationObserver(() => { clearTimeout(t); t = setTimeout(revisar, 200); }).observe(document.body, { childList: true, subtree: true }); } catch (_) {}

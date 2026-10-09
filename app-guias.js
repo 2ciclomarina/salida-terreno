@@ -239,18 +239,24 @@
         grupos.push([c.T.ok, c.P.ok]);
       }
       const g = grupos.filter(x => x.length);
-      const todos = [].concat.apply([], g), hechas = todos.filter(Boolean).length;
+      const todos = [].concat.apply([], g), hechas = todos.filter(Boolean).length, pc = todos.length ? Math.round(hechas * 100 / todos.length) : 0;
       const bar = g.map(x => '<div class="flex gap-1" style="flex:' + x.length + ' 1 0%">' + x.map(v => v
-        ? '<div class="h-4 flex-1 rounded-md" style="background:#39ff14;box-shadow:0 0 8px #39ff14"></div>'
-        : '<div class="h-4 flex-1 rounded-md" style="background:#ef4444"></div>').join('') + '</div>').join('<div style="width:6px"></div>');
-      const ok = v => v ? '✓' : '⏳';
-      const det = '<div class="text-[11px] mt-1 opacity-95">📝 Preguntas ' + c.A.hechas + '/' + c.A.total +
-        (G.cargada ? ' · 📘 Fichas ' + c.fEnv + '/' + c.fTot + ' · 📊 Terreno ' + ok(c.T.ok) + ' · 📋 Evaluación de fichas ' + ok(c.P.ok) : '') + '</div>';
+        ? '<div class="flex-1 rounded-full" style="height:10px;background:#39ff14;box-shadow:0 0 6px #39ff14"></div>'
+        : '<div class="flex-1 rounded-full" style="height:10px;background:rgba(255,255,255,.28)"></div>').join('') + '</div>').join('<div style="width:5px"></div>');
+      const pill = (ic, t, v, okv) => '<div class="rounded-xl px-2 py-1.5 text-center" style="background:' + (okv ? 'rgba(57,255,20,.22);border:1px solid rgba(57,255,20,.7)' : 'rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.3)') + '">' +
+        '<div class="text-[10px] opacity-90 leading-tight">' + ic + ' ' + t + '</div><div class="text-sm font-extrabold leading-tight">' + v + '</div></div>';
+      const pills = pill('📝', 'Preguntas', c.A.hechas + '/' + c.A.total, c.A.total > 0 && c.A.hechas === c.A.total) +
+        (G.cargada ? pill('📘', 'Fichas', c.fEnv + '/' + c.fTot, c.fTot > 0 && c.fEnv === c.fTot) + pill('📊', 'Terreno', c.T.ok ? '✓' : '⏳', c.T.ok) + pill('📋', 'Eval. fichas', c.P.ok ? '✓' : '⏳', c.P.ok) : '');
+      const cols = G.cargada ? 4 : 1;
       const box = c.completo
-        ? '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-3 py-2 text-center" style="background:#fde047;color:#1e293b;box-shadow:0 0 0 3px rgba(253,224,71,.55),0 0 14px rgba(253,224,71,.8)"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-3xl font-extrabold leading-none">' + fmt1(c.nota) + '</div></button>'
-        : '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-3 py-2 text-center" style="background:rgba(255,255,255,.2);border:2px dashed rgba(255,255,255,.7);color:inherit"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-xl font-extrabold leading-none">—</div><div class="text-[10px] mt-0.5">pendiente</div></button>';
-      return '<div id="g-avance" class="flex items-stretch gap-3"><div class="flex-1 min-w-0"><div class="flex" style="min-height:16px">' + bar + '</div>' +
-        '<div class="flex justify-between text-[11px] mt-1.5 font-semibold"><span><span style="color:#39ff14">●</span> Realizadas: ' + hechas + '</span><span><span style="color:#ff6b6b">●</span> Pendientes: ' + (todos.length - hechas) + '</span></div>' + det + '</div>' + box + '</div>';
+        ? '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-4 py-2 text-center flex flex-col items-center justify-center" style="min-width:92px;background:#fde047;color:#1e293b;box-shadow:0 0 0 3px rgba(253,224,71,.55),0 0 16px rgba(253,224,71,.85)"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-4xl font-extrabold leading-none">' + fmt1(c.nota) + '</div></button>'
+        : '<button type="button" data-accion="g-ir-guia" class="shrink-0 rounded-2xl px-4 py-2 text-center flex flex-col items-center justify-center" style="min-width:92px;background:rgba(255,255,255,.16);border:2px dashed rgba(255,255,255,.7);color:inherit"><div class="text-[10px] font-extrabold uppercase tracking-wide">Nota final</div><div class="text-2xl font-extrabold leading-none">—</div><div class="text-[10px] mt-0.5 opacity-90">pendiente</div></button>';
+      return '<div id="g-avance" class="rounded-2xl p-3 space-y-2.5" style="background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.22)">' +
+        '<div class="flex items-stretch gap-3"><div class="flex-1 min-w-0 flex flex-col justify-center gap-1.5">' +
+        '<div class="flex items-end justify-between"><span class="text-[11px] font-extrabold uppercase tracking-wide opacity-90">Mi avance</span><span class="text-3xl font-extrabold leading-none">' + pc + '<span class="text-base">%</span></span></div>' +
+        '<div class="flex">' + bar + '</div>' +
+        '<div class="flex justify-between text-[11px] font-semibold"><span><span style="color:#39ff14">●</span> Realizadas: ' + hechas + '</span><span><span style="color:#fca5a5">●</span> Pendientes: ' + (todos.length - hechas) + '</span></div></div>' + box + '</div>' +
+        '<div class="grid gap-1.5" style="grid-template-columns:repeat(' + (G.cargada ? 4 : 1) + ',minmax(0,1fr))">' + pills + '</div></div>';
     }
     function pintarAvance() {
       const info = $('#est-info');

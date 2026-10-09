@@ -134,6 +134,7 @@
     if (!b) return;
     if (b.dataset.accion === 'responder') {
       ACT = b.dataset.id || null;
+      if (!traido) traer();
       const loc = leerLS(); if (ACT && loc[ACT] && (!DR[ACT] || (loc[ACT].t || 0) > (DR[ACT].t || 0))) DR[ACT] = loc[ACT];
       setTimeout(restaurar, 250); setTimeout(restaurar, 900);
     } else if (b.dataset.accion === 'tab-est' || b.dataset.accion === 'cerrar-modal') { clearTimeout(tLocal); if (ACT && DR[ACT]) guardarLocal(); ACT = null; }
@@ -158,5 +159,6 @@
 
   // Esperar a que el estudiante haya ingresado
   let n = 0;
-  const espera = setInterval(() => { if (rut() && typeof S !== 'undefined' && S.token) { clearInterval(espera); traer(); } else if (++n > 120) clearInterval(espera); }, 1000);
+  // Se pide con calma (unos segundos después de ingresar) para no competir con la carga inicial de la aplicación
+  const espera = setInterval(() => { if (rut() && typeof S !== 'undefined' && S.token) { clearInterval(espera); setTimeout(traer, 6000); } else if (++n > 120) clearInterval(espera); }, 1000);
 })();
